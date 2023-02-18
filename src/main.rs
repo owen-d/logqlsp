@@ -1,15 +1,10 @@
-use std::collections::{HashMap};
+use std::collections::HashMap;
 
 use dashmap::DashMap;
-use nrs_language_server::chumsky::{parse, type_inference, Func, ImCompleteSemanticToken};
-use nrs_language_server::completion::completion;
-use nrs_language_server::jump_definition::{get_definition};
-use nrs_language_server::reference::get_reference;
-use nrs_language_server::semantic_token::{semantic_token_from_ast, LEGEND_TYPE};
 use ropey::Rope;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tower_lsp::jsonrpc::{Result};
+use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::notification::Notification;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
@@ -54,9 +49,9 @@ impl LanguageServer for Backend {
                             text_document_registration_options: {
                                 TextDocumentRegistrationOptions {
                                     document_selector: Some(vec![DocumentFilter {
-                                        language: Some("nrs".to_string()),
+                                        language: Some("logql".to_string()),
                                         scheme: Some("file".to_string()),
-                                        pattern: None,
+                                        pattern: Some("*.logql".to_string()),
                                     }]),
                                 }
                             },
@@ -81,100 +76,6 @@ impl LanguageServer for Backend {
             },
         })
     }
-    async fn semantic_tokens_full(
-        &self,
-        params: SemanticTokensParams,
-    ) -> Result<Option<SemanticTokensResult>> {
-        let uri = params.text_document.uri.to_string();
-        self.client
-            .log_message(MessageType::LOG, "semantic_token_full")
-            .await;
-        let semantic_tokens = || -> Option<Vec<SemanticToken>> {
-            let mut im_complete_tokens = self.semantic_token_map.get_mut(&uri)?;
-            let rope = self.document_map.get(&uri)?;
-            let ast = self.ast_map.get(&uri)?;
-            let extends_tokens = semantic_token_from_ast(&ast);
-            im_complete_tokens.extend(extends_tokens);
-            im_complete_tokens.sort_by(|a, b| a.start.cmp(&b.start));
-            let mut pre_line = 0;
-            let mut pre_start = 0;
-            let semantic_tokens = im_complete_tokens
-                .iter()
-                .filter_map(|token| {
-                    let line = rope.try_byte_to_line(token.start as usize).ok()? as u32;
-                    let first = rope.try_line_to_char(line as usize).ok()? as u32;
-                    let start = rope.try_byte_to_char(token.start as usize).ok()? as u32 - first;
-                    let delta_line = line - pre_line;
-                    let delta_start = if delta_line == 0 {
-                        start - pre_start
-                    } else {
-                        start
-                    };
-                    let ret = Some(SemanticToken {
-                        delta_line,
-                        delta_start,
-                        length: token.length as u32,
-                        token_type: token.token_type as u32,
-                        token_modifiers_bitset: 0,
-                    });
-                    pre_line = line;
-                    pre_start = start;
-                    ret
-                })
-                .collect::<Vec<_>>();
-            Some(semantic_tokens)
-        }();
-        if let Some(semantic_token) = semantic_tokens {
-            return Ok(Some(SemanticTokensResult::Tokens(SemanticTokens {
-                result_id: None,
-                data: semantic_token,
-            })));
-        }
-        Ok(None)
-    }
-
-    async fn semantic_tokens_range(
-        &self,
-        params: SemanticTokensRangeParams,
-    ) -> Result<Option<SemanticTokensRangeResult>> {
-        let uri = params.text_document.uri.to_string();
-        let semantic_tokens = || -> Option<Vec<SemanticToken>> {
-            let im_complete_tokens = self.semantic_token_map.get(&uri)?;
-            let rope = self.document_map.get(&uri)?;
-            let mut pre_line = 0;
-            let mut pre_start = 0;
-            let semantic_tokens = im_complete_tokens
-                .iter()
-                .filter_map(|token| {
-                    let line = rope.try_byte_to_line(token.start as usize).ok()? as u32;
-                    let first = rope.try_line_to_char(line as usize).ok()? as u32;
-                    let start = rope.try_byte_to_char(token.start as usize).ok()? as u32 - first;
-                    let ret = Some(SemanticToken {
-                        delta_line: line - pre_line,
-                        delta_start: if start >= pre_start {
-                            start - pre_start
-                        } else {
-                            start
-                        },
-                        length: token.length as u32,
-                        token_type: token.token_type as u32,
-                        token_modifiers_bitset: 0,
-                    });
-                    pre_line = line;
-                    pre_start = start;
-                    ret
-                })
-                .collect::<Vec<_>>();
-            Some(semantic_tokens)
-        }();
-        if let Some(semantic_token) = semantic_tokens {
-            return Ok(Some(SemanticTokensRangeResult::Tokens(SemanticTokens {
-                result_id: None,
-                data: semantic_token,
-            })));
-        }
-        Ok(None)
-    }
 
     async fn initialized(&self, _: InitializedParams) {
         self.client
@@ -186,56 +87,6 @@ impl LanguageServer for Backend {
         Ok(())
     }
 
-    async fn references(&self, params: ReferenceParams) -> Result<Option<Vec<Location>>> {
-        let reference_list = || -> Option<Vec<Location>> {
-            let uri = params.text_document_position.text_document.uri;
-            let ast = self.ast_map.get(&uri.to_string())?;
-            let rope = self.document_map.get(&uri.to_string())?;
-
-            let position = params.text_document_position.position;
-            let char = rope.try_line_to_char(position.line as usize).ok()?;
-            let offset = char + position.character as usize;
-            let reference_list = get_reference(&ast, offset, false);
-            let ret = reference_list
-                .into_iter()
-                .filter_map(|(_, range)| {
-                    let start_position = offset_to_position(range.start, &rope)?;
-                    let end_position = offset_to_position(range.end, &rope)?;
-
-                    let range = Range::new(start_position, end_position);
-
-                    Some(Location::new(uri.clone(), range))
-                })
-                .collect::<Vec<_>>();
-            Some(ret)
-        }();
-        Ok(reference_list)
-    }
-
-    async fn goto_definition(
-        &self,
-        params: GotoDefinitionParams,
-    ) -> Result<Option<GotoDefinitionResponse>> {
-        let definition = || -> Option<GotoDefinitionResponse> {
-            let uri = params.text_document_position_params.text_document.uri;
-            let ast = self.ast_map.get(&uri.to_string())?;
-            let rope = self.document_map.get(&uri.to_string())?;
-
-            let position = params.text_document_position_params.position;
-            let char = rope.try_line_to_char(position.line as usize).ok()?;
-            let offset = char + position.character as usize;
-            let span = get_definition(&ast, offset);
-            span.and_then(|(_, range)| {
-                let start_position = offset_to_position(range.start, &rope)?;
-                let end_position = offset_to_position(range.end, &rope)?;
-
-                let range = Range::new(start_position, end_position);
-
-                Some(GotoDefinitionResponse::Scalar(Location::new(uri, range)))
-            })
-        }();
-        Ok(definition)
-    }
     async fn did_change_workspace_folders(&self, _: DidChangeWorkspaceFoldersParams) {
         self.client
             .log_message(MessageType::INFO, "workspace folders changed!")
@@ -299,89 +150,6 @@ impl LanguageServer for Backend {
         self.client
             .log_message(MessageType::INFO, "file closed!")
             .await;
-    }
-
-    async fn rename(&self, params: RenameParams) -> Result<Option<WorkspaceEdit>> {
-        let workspace_edit = || -> Option<WorkspaceEdit> {
-            let uri = params.text_document_position.text_document.uri;
-            let ast = self.ast_map.get(&uri.to_string())?;
-            let rope = self.document_map.get(&uri.to_string())?;
-
-            let position = params.text_document_position.position;
-            let char = rope.try_line_to_char(position.line as usize).ok()?;
-            let offset = char + position.character as usize;
-            let reference_list = get_reference(&ast, offset, true);
-            let new_name = params.new_name;
-            if reference_list.len() > 0 {
-                let edit_list = reference_list
-                    .into_iter()
-                    .filter_map(|(_, range)| {
-                        let start_position = offset_to_position(range.start, &rope)?;
-                        let end_position = offset_to_position(range.end, &rope)?;
-                        Some(TextEdit::new(
-                            Range::new(start_position, end_position),
-                            new_name.clone(),
-                        ))
-                    })
-                    .collect::<Vec<_>>();
-                let mut map = HashMap::new();
-                map.insert(uri, edit_list);
-                let workspace_edit = WorkspaceEdit::new(map);
-                Some(workspace_edit)
-            } else {
-                None
-            }
-        }();
-        Ok(workspace_edit)
-    }
-
-    async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
-        let uri = params.text_document_position.text_document.uri;
-        let position = params.text_document_position.position;
-        let completions = || -> Option<Vec<CompletionItem>> {
-            let rope = self.document_map.get(&uri.to_string())?;
-            let ast = self.ast_map.get(&uri.to_string())?;
-            let char = rope.try_line_to_char(position.line as usize).ok()?;
-            let offset = char + position.character as usize;
-            let completions = completion(&ast, offset);
-            let mut ret = Vec::with_capacity(completions.len());
-            for (_, item) in completions {
-                match item {
-                    nrs_language_server::completion::ImCompleteCompletionItem::Variable(var) => {
-                        ret.push(CompletionItem {
-                            label: var.clone(),
-                            insert_text: Some(var.clone()),
-                            kind: Some(CompletionItemKind::VARIABLE),
-                            detail: Some(var),
-                            ..Default::default()
-                        });
-                    }
-                    nrs_language_server::completion::ImCompleteCompletionItem::Function(
-                        name,
-                        args,
-                    ) => {
-                        ret.push(CompletionItem {
-                            label: name.clone(),
-                            kind: Some(CompletionItemKind::FUNCTION),
-                            detail: Some(name.clone()),
-                            insert_text: Some(format!(
-                                "{}({})",
-                                name,
-                                args.iter()
-                                    .enumerate()
-                                    .map(|(index, item)| { format!("${{{}:{}}}", index + 1, item) })
-                                    .collect::<Vec<_>>()
-                                    .join(",")
-                            )),
-                            insert_text_format: Some(InsertTextFormat::SNIPPET),
-                            ..Default::default()
-                        });
-                    }
-                }
-            }
-            Some(ret)
-        }();
-        Ok(completions.map(CompletionResponse::Array))
     }
 }
 #[derive(Debug, Deserialize, Serialize)]
