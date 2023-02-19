@@ -1,8 +1,40 @@
+use std::collections::HashMap;
+use std::fmt;
+
 use chumsky::prelude::*;
 use chumsky::Parser;
 
+pub type Span = std::ops::Range<usize>;
+pub type Spanned<T> = (T, Span);
+
+#[derive(Debug)]
+pub struct ImCompleteSemanticToken {
+    pub start: usize,
+    pub length: usize,
+    pub token_type: usize,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum Token {
+    Str(String),   // "<label_value>"
+    Ident(String), // <label_name>
+    Op(String),    // =, !=, =~, !~, |
+    Ctrl(char),    // {, }, [, ], (, ), ,
+}
+
+impl fmt::Display for Token {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Token::Str(s) => write!(f, "\"{}\"", s),
+            Token::Ident(s) => write!(f, "{}", s),
+            Token::Op(s) => write!(f, "{}", s),
+            Token::Ctrl(c) => write!(f, "{}", c),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Expr {
+    Error,
     LogExpr(LogExpr),
 }
 
@@ -37,55 +69,107 @@ pub enum MatcherType {
     Nre,
 }
 
-pub fn parser() -> impl Parser<char, Expr, Error = Simple<char>> {
+// lexer turns a char stream into a set of spanned tokens.
+pub fn lexer() -> impl Parser<char, Vec<(Token, Span)>, Error = Simple<char>> {
     // A parser for strings
     let str_ = just('"')
         .ignore_then(filter(|c| *c != '"').repeated())
         .then_ignore(just('"'))
-        .collect::<String>();
+        .collect::<String>()
+        .map(Token::Str);
 
-    // A parser for label names
-    let label_name = filter(|c: &char| c.is_alphanumeric() || *c == '_')
+    // A parser for operators
+    let op = one_of("|!=~")
         .repeated()
-        .collect::<String>();
+        .at_least(1)
+        .collect::<String>()
+        .map(Token::Op);
+
+    // A parser for control characters (delimiters, semicolons, etc.)
+    let ctrl = one_of("()[]{},").map(|c| Token::Ctrl(c));
+
+    // A parser for identifiers and keywords
+    let ident = text::ident().map(|ident: String| match ident.as_str() {
+        _ => Token::Ident(ident),
+    });
+
+    // A single token can be one of the above
+    let token = str_
+        .or(op)
+        .or(ctrl)
+        .or(ident)
+        .recover_with(skip_then_retry_until([]));
+
+    let comment = just("#").then(take_until(just('\n'))).padded();
+
+    token
+        .padded_by(comment.repeated())
+        .map_with_span(|tok, span| (tok, span))
+        .padded()
+        .repeated()
+}
+
+pub fn expr_parser() -> impl Parser<Token, Expr, Error = Simple<Token>> + Clone {
+    // A parser for label names
+    let label_name = filter_map(|span, tok| match tok {
+        Token::Ident(s) => {
+            match s
+                .chars()
+                .into_iter()
+                .all(|c| c.is_alphanumeric() || c == '_')
+            {
+                true => Ok(s),
+                false => Err(Simple::expected_input_found(span, Vec::new(), Some(tok))),
+            }
+        }
+        _ => Err(Simple::expected_input_found(span, Vec::new(), Some(tok))),
+    });
 
     // a parser for matcher types
-    let matcher_type = just("=")
-        .or(just("!="))
-        .or(just("=~"))
-        .or(just("!~"))
-        .map(|s| match s {
-            "=" => MatcherType::Eq,
-            "!=" => MatcherType::Neq,
-            "=~" => MatcherType::Re,
-            "!~" => MatcherType::Nre,
-            _ => unreachable!(),
+    let matcher_type = filter_map(|span, tok| match tok {
+        Token::Op(s) => match s.as_str() {
+            "=" => Ok(MatcherType::Eq),
+            "!=" => Ok(MatcherType::Neq),
+            "=~" => Ok(MatcherType::Re),
+            "!~" => Ok(MatcherType::Nre),
+            _ => Err(Simple::expected_input_found(span, Vec::new(), Some(tok))),
+        },
+        _ => Err(Simple::expected_input_found(span, Vec::new(), Some(tok))),
+    });
+
+    // a parser for label matchers
+    let label_matcher = label_name
+        .then(matcher_type)
+        .then(filter_map(|span, tok| match tok {
+            Token::Str(s) => Ok(s),
+            _ => Err(Simple::expected_input_found(span, Vec::new(), Some(tok))),
+        }))
+        .map(|((name, matcher_type), value)| LabelMatcher {
+            name,
+            value,
+            matcher_type,
         });
 
     // a parser for label matchers
-    let label_matcher =
-        label_name
-            .then(matcher_type)
-            .then(str_)
-            .map(|((name, matcher_type), value)| LabelMatcher {
-                name,
-                value,
-                matcher_type,
-            });
-
-    // a parser for label matchers
     let label_matchers = label_matcher
-        .padded()
-        .separated_by(just(","))
-        .delimited_by(just("{"), just("}"))
+        .separated_by(filter_map(|span, tok| match tok {
+            Token::Ctrl(',') => Ok(()),
+            _ => Err(Simple::expected_input_found(span, Vec::new(), Some(tok))),
+        }))
+        .delimited_by(
+            filter_map(|span, tok| match tok {
+                Token::Ctrl('{') => Ok(()),
+                _ => Err(Simple::expected_input_found(span, Vec::new(), Some(tok))),
+            }),
+            filter_map(|span, tok| match tok {
+                Token::Ctrl('}') => Ok(()),
+                _ => Err(Simple::expected_input_found(span, Vec::new(), Some(tok))),
+            }),
+        )
         .map(|labels| Selector { labels });
-
-    // a parser for comments
-    let maybe_comment = just("#").then(take_until(just('\n'))).padded().or_not();
 
     // final parser
     label_matchers
-        .padded_by(maybe_comment)
         .then_ignore(end())
         .map(LogExpr::Selector)
         .map(Expr::LogExpr)
