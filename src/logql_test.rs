@@ -35,17 +35,26 @@ fn parse_simple() {
             }))),
         },
         TestCase {
-            input: r#"{job="foo"."#,
+            input: r#"job="foo"}"#,
             expected: Err(vec![Simple::expected_input_found(
-                11..12,
-                vec![Some(Token::Ctrl('}'))],
-                None,
+                0..3,
+                vec![Some(Token::Ctrl('{'))],
+                Some(Token::Ident("job".to_string())),
+            )
+            .with_label("label_matchers")]),
+        },
+        TestCase {
+            input: r#"{job="foo"abc"#,
+            expected: Err(vec![Simple::expected_input_found(
+                10..13,
+                vec![Some(Token::Ctrl(',')), Some(Token::Ctrl('}'))],
+                Some(Token::Ident("abc".to_string())),
             )
             .with_label("label_matchers")]),
         },
     ] {
         let lexed = lexer().parse(case.input);
-        assert!(lexed.is_ok());
+        assert!(lexed.is_ok(), "{:#?}", lexed.err());
         let len = case.input.chars().count();
         let stream = Stream::from_iter(len..len + 1, lexed.unwrap().into_iter());
 
@@ -65,7 +74,7 @@ fn parse_simple() {
                     assert_eq!(exp_msg, got_msg);
                 });
         } else {
-            assert!(parsed.is_ok());
+            assert!(parsed.is_ok(), "{:?}", parsed.err());
             assert_eq!(parsed.unwrap(), case.expected.unwrap());
         }
     }

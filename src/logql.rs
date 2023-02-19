@@ -1,10 +1,6 @@
-use std::collections::HashMap;
 use std::fmt;
 
-use chumsky::error::Cheap;
-use chumsky::prelude::*;
-use chumsky::primitive::OneOf;
-use chumsky::Parser;
+use chumsky::{prelude::*, Parser};
 
 pub type Span = std::ops::Range<usize>;
 pub type Spanned<T> = (T, Span);
@@ -114,20 +110,7 @@ pub fn lexer() -> impl Parser<char, Vec<(Token, Span)>, Error = Simple<char>> {
 pub fn expr_parser() -> impl Parser<Token, Expr, Error = Simple<Token>> + Clone {
     // A parser for label names
     let label_name = filter_map(|span, tok| match tok {
-        Token::Ident(s) => {
-            match s
-                .chars()
-                .into_iter()
-                .all(|c| c.is_alphanumeric() || c == '_')
-            {
-                true => Ok(s),
-                false => Err(Simple::expected_input_found(
-                    span,
-                    Vec::new(),
-                    Some(Token::Ident(s)),
-                )),
-            }
-        }
+        Token::Ident(s) => Ok(s),
         _ => Err(Simple::expected_input_found(span, Vec::new(), Some(tok))),
     })
     .labelled("label_name");
