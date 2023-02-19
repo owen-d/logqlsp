@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 use std::fmt;
 
+use chumsky::error::Cheap;
 use chumsky::prelude::*;
+use chumsky::primitive::OneOf;
 use chumsky::Parser;
 
 pub type Span = std::ops::Range<usize>;
@@ -119,11 +121,16 @@ pub fn expr_parser() -> impl Parser<Token, Expr, Error = Simple<Token>> + Clone 
                 .all(|c| c.is_alphanumeric() || c == '_')
             {
                 true => Ok(s),
-                false => Err(Simple::expected_input_found(span, Vec::new(), Some(tok))),
+                false => Err(Simple::expected_input_found(
+                    span,
+                    Vec::new(),
+                    Some(Token::Ident(s)),
+                )),
             }
         }
         _ => Err(Simple::expected_input_found(span, Vec::new(), Some(tok))),
-    });
+    })
+    .labelled("label_name");
 
     // a parser for matcher types
     let matcher_type = filter_map(|span, tok| match tok {
@@ -132,41 +139,64 @@ pub fn expr_parser() -> impl Parser<Token, Expr, Error = Simple<Token>> + Clone 
             "!=" => Ok(MatcherType::Neq),
             "=~" => Ok(MatcherType::Re),
             "!~" => Ok(MatcherType::Nre),
-            _ => Err(Simple::expected_input_found(span, Vec::new(), Some(tok))),
+            _ => Err(Simple::expected_input_found(
+                span,
+                Vec::new(),
+                Some(Token::Op(s)),
+            )),
         },
+        _ => Err(Simple::expected_input_found(span, vec![], Some(tok))),
+    })
+    .labelled("matcher_type");
+
+    // a parser for label values
+    let label_value = filter_map(|span, tok| match tok {
+        Token::Str(s) => Ok(s),
         _ => Err(Simple::expected_input_found(span, Vec::new(), Some(tok))),
-    });
+    })
+    .labelled("label_value");
 
     // a parser for label matchers
     let label_matcher = label_name
         .then(matcher_type)
-        .then(filter_map(|span, tok| match tok {
-            Token::Str(s) => Ok(s),
-            _ => Err(Simple::expected_input_found(span, Vec::new(), Some(tok))),
-        }))
+        .then(label_value)
         .map(|((name, matcher_type), value)| LabelMatcher {
             name,
             value,
             matcher_type,
-        });
+        })
+        .labelled("label_matcher");
 
     // a parser for label matchers
     let label_matchers = label_matcher
         .separated_by(filter_map(|span, tok| match tok {
             Token::Ctrl(',') => Ok(()),
-            _ => Err(Simple::expected_input_found(span, Vec::new(), Some(tok))),
+            _ => Err(Simple::expected_input_found(
+                span,
+                vec![Some(Token::Ctrl(','))],
+                Some(tok),
+            )),
         }))
         .delimited_by(
             filter_map(|span, tok| match tok {
                 Token::Ctrl('{') => Ok(()),
-                _ => Err(Simple::expected_input_found(span, Vec::new(), Some(tok))),
+                _ => Err(Simple::expected_input_found(
+                    span,
+                    vec![Some(Token::Ctrl('{'))],
+                    Some(tok),
+                )),
             }),
             filter_map(|span, tok| match tok {
                 Token::Ctrl('}') => Ok(()),
-                _ => Err(Simple::expected_input_found(span, Vec::new(), Some(tok))),
+                _ => Err(Simple::expected_input_found(
+                    span,
+                    vec![Some(Token::Ctrl('}'))],
+                    Some(tok),
+                )),
             }),
         )
-        .map(|labels| Selector { labels });
+        .map(|labels| Selector { labels })
+        .labelled("label_matchers");
 
     // final parser
     label_matchers
