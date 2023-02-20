@@ -1,12 +1,15 @@
-use std::fmt;
+use std::{collections::HashMap, fmt};
 
-use chumsky::{prelude::*, Parser};
+use chumsky::{prelude::*, Parser, Stream};
+use tower_lsp::lsp_types::SemanticTokenType;
+
+use crate::semantic_tokens::{CONTROL, IDENT, LEGEND_TYPE, OPERATOR, STRING};
 
 pub type Span = std::ops::Range<usize>;
 pub type Spanned<T> = (T, Span);
 
 #[derive(Debug)]
-pub struct ImCompleteSemanticToken {
+pub struct InCompleteSemanticToken {
     pub start: usize,
     pub length: usize,
     pub token_type: usize,
@@ -186,4 +189,67 @@ pub fn expr_parser() -> impl Parser<Token, Expr, Error = Simple<Token>> + Clone 
         .then_ignore(end())
         .map(LogExpr::Selector)
         .map(Expr::LogExpr)
+}
+
+pub fn parse(
+    src: &str,
+) -> (
+    Option<Expr>,
+    Vec<Simple<String>>,
+    Vec<InCompleteSemanticToken>,
+) {
+    let (tokens, errs) = lexer().parse_recovery(src);
+    let (ast, tokenize_errors, semantic_tokens) = if let Some(tokens) = tokens {
+        let semantic_tokens = tokens
+            .iter()
+            .filter_map(|(token, span)| match token {
+                Token::Str(_) => Some(InCompleteSemanticToken {
+                    start: span.start,
+                    length: span.len(),
+                    token_type: LEGEND_TYPE.iter().position(|item| item == &STRING).unwrap(),
+                }),
+                Token::Ident(_) => Some(InCompleteSemanticToken {
+                    start: span.start,
+                    length: span.len(),
+                    token_type: LEGEND_TYPE.iter().position(|item| item == &IDENT).unwrap(),
+                }),
+                Token::Op(_) => Some(InCompleteSemanticToken {
+                    start: span.start,
+                    length: span.len(),
+                    token_type: LEGEND_TYPE
+                        .iter()
+                        .position(|item| item == &OPERATOR)
+                        .unwrap(),
+                }),
+                Token::Ctrl(_) => Some(InCompleteSemanticToken {
+                    start: span.start,
+                    length: span.len(),
+                    token_type: LEGEND_TYPE
+                        .iter()
+                        .position(|item| item == &CONTROL)
+                        .unwrap(),
+                }),
+            })
+            .collect::<Vec<_>>();
+
+        let len = src.chars().count();
+        let (ast, parse_errs) =
+            expr_parser().parse_recovery(Stream::from_iter(len..len + 1, tokens.into_iter()));
+
+        (ast, parse_errs, semantic_tokens)
+    } else {
+        (None, Vec::new(), Vec::new())
+    };
+
+    let parse_errors = errs
+        .into_iter()
+        .map(|e| e.map(|c| c.to_string()))
+        .chain(
+            tokenize_errors
+                .into_iter()
+                .map(|e| e.map(|tok| tok.to_string())),
+        )
+        .collect::<Vec<_>>();
+
+    (ast, parse_errors, semantic_tokens)
 }
