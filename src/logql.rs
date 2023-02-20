@@ -36,29 +36,29 @@ impl fmt::Display for Token {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Expr {
     Error,
-    LogExpr(LogExpr),
+    LogExpr(Spanned<LogExpr>),
 }
 
 // LogExpr is a subset of the LogQL expression language.
 // It takes a selector and a pipeline of operations.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum LogExpr {
-    Selector(Selector),
+    Selector(Spanned<Selector>),
     // Pipelined((Selector, Pipeline)),
 }
 
 // Selector is a set of label matchers.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Selector {
-    pub labels: Vec<LabelMatcher>,
+    pub labels: Vec<Spanned<LabelMatcher>>,
 }
 
 // LabelMatcher is a matcher for a label.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LabelMatcher {
-    pub name: String,
-    pub value: String,
-    pub matcher_type: MatcherType,
+    pub name: Spanned<String>,
+    pub value: Spanned<String>,
+    pub matcher_type: Spanned<MatcherType>,
 }
 
 // MatcherType is the type of matcher. It can be equality, regex, etc.
@@ -110,10 +110,10 @@ pub fn lexer() -> impl Parser<char, Vec<(Token, Span)>, Error = Simple<char>> {
         .repeated()
 }
 
-pub fn expr_parser() -> impl Parser<Token, Expr, Error = Simple<Token>> + Clone {
+pub fn expr_parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Clone {
     // A parser for label names
     let label_name = filter_map(|span, tok| match tok {
-        Token::Ident(s) => Ok(s),
+        Token::Ident(s) => Ok((s, span)),
         _ => Err(Simple::expected_input_found(span, Vec::new(), Some(tok))),
     })
     .labelled("label_name");
@@ -121,10 +121,10 @@ pub fn expr_parser() -> impl Parser<Token, Expr, Error = Simple<Token>> + Clone 
     // a parser for matcher types
     let matcher_type = filter_map(|span, tok| match tok {
         Token::Op(s) => match s.as_str() {
-            "=" => Ok(MatcherType::Eq),
-            "!=" => Ok(MatcherType::Neq),
-            "=~" => Ok(MatcherType::Re),
-            "!~" => Ok(MatcherType::Nre),
+            "=" => Ok((MatcherType::Eq, span)),
+            "!=" => Ok((MatcherType::Neq, span)),
+            "=~" => Ok((MatcherType::Re, span)),
+            "!~" => Ok((MatcherType::Nre, span)),
             _ => Err(Simple::expected_input_found(
                 span,
                 Vec::new(),
@@ -137,7 +137,7 @@ pub fn expr_parser() -> impl Parser<Token, Expr, Error = Simple<Token>> + Clone 
 
     // a parser for label values
     let label_value = filter_map(|span, tok| match tok {
-        Token::Str(s) => Ok(s),
+        Token::Str(s) => Ok((s, span)),
         _ => Err(Simple::expected_input_found(span, Vec::new(), Some(tok))),
     })
     .labelled("label_value");
@@ -146,49 +146,70 @@ pub fn expr_parser() -> impl Parser<Token, Expr, Error = Simple<Token>> + Clone 
     let label_matcher = label_name
         .then(matcher_type)
         .then(label_value)
-        .map(|((name, matcher_type), value)| LabelMatcher {
-            name,
-            value,
-            matcher_type,
+        .map(|((name, matcher_type), value)| {
+            (
+                LabelMatcher {
+                    name: name.clone(),
+                    value: value.clone(),
+                    matcher_type,
+                },
+                name.1.start..value.1.end,
+            )
         })
         .labelled("label_matcher");
 
     // a parser for label matchers
-    let label_matchers = label_matcher
-        .separated_by(filter_map(|span, tok| match tok {
+    let label_matchers = filter_map(|span, tok| match tok {
+        // preserve the original span even though the item is discarded
+        Token::Ctrl('{') => Ok(span),
+        _ => Err(Simple::expected_input_found(
+            span,
+            vec![Some(Token::Ctrl('{'))],
+            Some(tok),
+        )),
+    })
+    .then(
+        label_matcher.separated_by(filter_map(|span, tok| match tok {
             Token::Ctrl(',') => Ok(()),
             _ => Err(Simple::expected_input_found(
                 span,
                 vec![Some(Token::Ctrl(','))],
                 Some(tok),
             )),
-        }))
-        .delimited_by(
-            filter_map(|span, tok| match tok {
-                Token::Ctrl('{') => Ok(()),
-                _ => Err(Simple::expected_input_found(
-                    span,
-                    vec![Some(Token::Ctrl('{'))],
-                    Some(tok),
-                )),
-            }),
-            filter_map(|span, tok| match tok {
-                Token::Ctrl('}') => Ok(()),
-                _ => Err(Simple::expected_input_found(
-                    span,
-                    vec![Some(Token::Ctrl('}'))],
-                    Some(tok),
-                )),
-            }),
+        })),
+    )
+    .then(filter_map(|span, tok| match tok {
+        // preserve the original span even though the item is discarded
+        Token::Ctrl('}') => Ok(span),
+        _ => Err(Simple::expected_input_found(
+            span,
+            vec![Some(Token::Ctrl('}'))],
+            Some(tok),
+        )),
+    }))
+    .map(|((lparen_span, label_matchers), rparen_span)| {
+        (
+            Selector {
+                labels: label_matchers,
+            },
+            lparen_span.start..rparen_span.end,
         )
-        .map(|labels| Selector { labels })
-        .labelled("label_matchers");
+    });
 
     // final parser
     label_matchers
         .then_ignore(end())
         .map(LogExpr::Selector)
-        .map(Expr::LogExpr)
+        .map(|log_expr| match log_expr {
+            // attach span info from underlying selector
+            LogExpr::Selector(selector) => {
+                let span = selector.clone().1;
+                (
+                    Expr::LogExpr((LogExpr::Selector(selector), span.clone())),
+                    span,
+                )
+            }
+        })
 }
 
 pub fn parse(
@@ -251,5 +272,5 @@ pub fn parse(
         )
         .collect::<Vec<_>>();
 
-    (ast, parse_errors, semantic_tokens)
+    (ast.map(|x| x.0), parse_errors, semantic_tokens)
 }

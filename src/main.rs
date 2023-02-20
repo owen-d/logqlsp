@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 
 use dashmap::DashMap;
-use nrs_language_server::semantic_tokens::LEGEND_TYPE;
+use logql_language_server::logql::{Expr, InCompleteSemanticToken};
+use logql_language_server::semantic_tokens::LEGEND_TYPE;
 use ropey::Rope;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -15,9 +16,9 @@ pub struct Todo(u8);
 #[derive(Debug)]
 struct Backend {
     client: Client,
-    ast_map: DashMap<String, HashMap<String, Todo>>,
+    ast_map: DashMap<String, Expr>,
     document_map: DashMap<String, Rope>,
-    semantic_token_map: DashMap<String, Vec<Todo>>,
+    semantic_token_map: DashMap<String, Vec<InCompleteSemanticToken>>,
 }
 
 #[tower_lsp::async_trait]
@@ -120,6 +121,58 @@ impl LanguageServer for Backend {
             Err(err) => self.client.log_message(MessageType::ERROR, err).await,
         }
 
+        Ok(None)
+    }
+
+    async fn semantic_tokens_full(
+        &self,
+        params: SemanticTokensParams,
+    ) -> Result<Option<SemanticTokensResult>> {
+        let uri = params.text_document.uri.to_string();
+        self.client
+            .log_message(MessageType::LOG, "semantic_token_full")
+            .await;
+        let semantic_tokens = || -> Option<Vec<SemanticToken>> {
+            let mut im_complete_tokens = self.semantic_token_map.get_mut(&uri)?;
+            let rope = self.document_map.get(&uri)?;
+            let ast = self.ast_map.get(&uri)?;
+            let extends_tokens = semantic_token_from_ast(&ast);
+            im_complete_tokens.extend(extends_tokens);
+            im_complete_tokens.sort_by(|a, b| a.start.cmp(&b.start));
+            let mut pre_line = 0;
+            let mut pre_start = 0;
+            let semantic_tokens = im_complete_tokens
+                .iter()
+                .filter_map(|token| {
+                    let line = rope.try_byte_to_line(token.start as usize).ok()? as u32;
+                    let first = rope.try_line_to_char(line as usize).ok()? as u32;
+                    let start = rope.try_byte_to_char(token.start as usize).ok()? as u32 - first;
+                    let delta_line = line - pre_line;
+                    let delta_start = if delta_line == 0 {
+                        start - pre_start
+                    } else {
+                        start
+                    };
+                    let ret = Some(SemanticToken {
+                        delta_line,
+                        delta_start,
+                        length: token.length as u32,
+                        token_type: token.token_type as u32,
+                        token_modifiers_bitset: 0,
+                    });
+                    pre_line = line;
+                    pre_start = start;
+                    ret
+                })
+                .collect::<Vec<_>>();
+            Some(semantic_tokens)
+        }();
+        if let Some(semantic_token) = semantic_tokens {
+            return Ok(Some(SemanticTokensResult::Tokens(SemanticTokens {
+                result_id: None,
+                data: semantic_token,
+            })));
+        }
         Ok(None)
     }
 }
