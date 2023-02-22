@@ -1,7 +1,6 @@
-use std::{collections::HashMap, fmt};
+use std::fmt;
 
 use chumsky::{prelude::*, Parser, Stream};
-use tower_lsp::lsp_types::SemanticTokenType;
 
 use crate::semantic_tokens::{CONTROL, IDENT, LEGEND_TYPE, OPERATOR, STRING};
 
@@ -194,7 +193,8 @@ pub fn expr_parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>>
             },
             lparen_span.start..rparen_span.end,
         )
-    });
+    })
+    .labelled("label_matchers");
 
     // final parser
     label_matchers

@@ -1,6 +1,6 @@
 use tower_lsp::lsp_types::SemanticTokenType;
 
-use crate::logql::{Expr, InCompleteSemanticToken, LogExpr, Spanned};
+use crate::logql::{Expr, InCompleteSemanticToken, LogExpr};
 
 pub const STRING: SemanticTokenType = SemanticTokenType::new("string");
 pub const IDENT: SemanticTokenType = SemanticTokenType::new("ident");
@@ -9,9 +9,9 @@ pub const CONTROL: SemanticTokenType = SemanticTokenType::new("control");
 
 pub const LEGEND_TYPE: &[SemanticTokenType] = &[STRING, IDENT, OPERATOR, CONTROL];
 
-pub fn semantic_token_from_ast(ast: &Spanned<Expr>) -> Vec<InCompleteSemanticToken> {
+pub fn semantic_token_from_ast(ast: &Expr) -> Vec<InCompleteSemanticToken> {
     let mut semantic_tokens = vec![];
-    match &ast.0 {
+    match &ast {
         Expr::Error => {}
         Expr::LogExpr((expr, _)) => match expr {
             LogExpr::Selector((sel, span)) => {

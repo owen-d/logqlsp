@@ -1,3 +1,4 @@
+pub mod completion;
 pub mod logql;
 pub mod semantic_tokens;
 
