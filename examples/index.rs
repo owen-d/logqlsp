@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 
 use im_rc::Vector;
-use nrs_language_server::chumsky::{parse, type_inference};
+use logql_language_server::logql::parse;
 
 fn main() {
-    let source = include_str!("./test.nrs");
+    let source = include_str!("./test.logql");
     // let source = r#"
     // test
     // println!("{:?}", &source[10..11]);
@@ -16,11 +16,4 @@ fn main() {
     //     println!("{:?}", errors);
     // }
     // println!("{:?}", semantic_tokens);
-    let mut hashmap = HashMap::new();
-    if let Some(ast) = ast {
-        ast.into_iter().for_each(|(k, v)| {
-            type_inference(&v.body, &mut hashmap);
-        });
-    }
-    println!("{:?}", hashmap);
 }
