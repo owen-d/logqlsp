@@ -243,6 +243,10 @@ impl LanguageServer for Backend {
         }
         Ok(None)
     }
+
+    // async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
+    //     todo!();
+    // }
 }
 
 impl Backend {

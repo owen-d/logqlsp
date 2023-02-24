@@ -1,6 +1,10 @@
-use std::fmt;
+use std::{
+    fmt::{self, Display},
+    hash::Hash,
+};
 
 use chumsky::{prelude::*, Parser, Stream};
+use tower_lsp::lsp_types::CompletionItem;
 
 use crate::semantic_tokens::{CONTROL, IDENT, LEGEND_TYPE, OPERATOR, STRING};
 
@@ -216,7 +220,7 @@ pub fn parse(
     src: &str,
 ) -> (
     Option<Expr>,
-    Vec<Simple<String>>,
+    Vec<Error<Simple<String>>>,
     Vec<InCompleteSemanticToken>,
 ) {
     let (tokens, errs) = lexer().parse_recovery(src);
@@ -270,7 +274,68 @@ pub fn parse(
                 .into_iter()
                 .map(|e| e.map(|tok| tok.to_string())),
         )
+        .map(|e| Error::new(e, None))
         .collect::<Vec<_>>();
 
     (ast.map(|x| x.0), parse_errors, semantic_tokens)
+}
+
+#[derive(Debug, Clone)]
+pub struct Error<A> {
+    err: A,
+    completions: Option<Vec<CompletionItem>>,
+}
+
+impl Display for Error<Simple<String>> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.err)
+    }
+}
+
+impl<E> Error<E> {
+    pub fn new(err: E, completions: Option<Vec<CompletionItem>>) -> Self {
+        Self { err, completions }
+    }
+}
+
+// wrapper implementation for Simple<T> with completion support
+impl<E, T> chumsky::Error<T> for Error<E>
+where
+    E: chumsky::Error<T>,
+{
+    type Span = <E as chumsky::Error<T>>::Span;
+    type Label = <E as chumsky::Error<T>>::Label;
+
+    fn expected_input_found<Iter: IntoIterator<Item = Option<T>>>(
+        span: Self::Span,
+        expected: Iter,
+        found: Option<T>,
+    ) -> Self {
+        Self {
+            err: E::expected_input_found(span, expected, found),
+            completions: None,
+        }
+    }
+
+    fn with_label(self, label: Self::Label) -> Self {
+        Self {
+            err: self.err.with_label(label),
+            completions: self.completions,
+        }
+    }
+
+    fn merge(self, other: Self) -> Self {
+        Self {
+            err: self.err.merge(other.err),
+            completions: match (self.completions, other.completions) {
+                (Some(mut a), Some(mut b)) => {
+                    a.append(&mut b);
+                    Some(a)
+                }
+                (Some(a), None) => Some(a),
+                (None, Some(b)) => Some(b),
+                (None, None) => None,
+            },
+        }
+    }
 }
