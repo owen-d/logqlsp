@@ -1,6 +1,3 @@
-use std::collections::HashMap;
-
-use im_rc::Vector;
 use logql_language_server::logql::parse;
 
 fn main() {
@@ -8,7 +5,7 @@ fn main() {
     // let source = r#"
     // test
     // println!("{:?}", &source[10..11]);
-    let (ast, errors, semantic_tokens) = parse(source);
+    let (_ast, errors, _semantic_tokens) = parse(source);
     println!("{:?}", errors);
     // if let Some(ref ast) = ast {
     //     println!("{:#?}", ast);

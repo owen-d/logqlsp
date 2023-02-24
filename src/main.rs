@@ -1,13 +1,10 @@
-use std::collections::HashMap;
-
 use dashmap::DashMap;
-use logql_language_server::logql::{Expr, InCompleteSemanticToken};
+use logql_language_server::logql::{parse, Expr, InCompleteSemanticToken};
 use logql_language_server::semantic_tokens::{semantic_token_from_ast, LEGEND_TYPE};
 use ropey::Rope;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tower_lsp::jsonrpc::Result;
-use tower_lsp::lsp_types::notification::Notification;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 
@@ -30,12 +27,13 @@ impl LanguageServer for Backend {
                 text_document_sync: Some(TextDocumentSyncCapability::Kind(
                     TextDocumentSyncKind::FULL,
                 )),
-                completion_provider: Some(CompletionOptions {
-                    resolve_provider: Some(false),
-                    trigger_characters: Some(vec![".".to_string()]),
-                    work_done_progress_options: Default::default(),
-                    all_commit_characters: None,
-                }),
+                completion_provider: None,
+                // completion_provider: Some(CompletionOptions {
+                //     resolve_provider: Some(false),
+                //     trigger_characters: Some(vec![".".to_string()]),
+                //     work_done_progress_options: Default::default(),
+                //     all_commit_characters: None,
+                // }),
                 execute_command_provider: Some(ExecuteCommandOptions {
                     commands: vec!["dummy.do_something".to_string()],
                     work_done_progress_options: Default::default(),
@@ -73,9 +71,9 @@ impl LanguageServer for Backend {
                         },
                     ),
                 ),
-                // definition: Some(GotoCapability::default()),
-                definition_provider: Some(OneOf::Left(true)),
                 references_provider: Some(OneOf::Left(false)),
+                // definition: Some(GotoCapability::default()),
+                definition_provider: Some(OneOf::Left(false)),
                 rename_provider: Some(OneOf::Left(false)),
                 ..ServerCapabilities::default()
             },
@@ -244,55 +242,6 @@ impl LanguageServer for Backend {
             })));
         }
         Ok(None)
-    }
-
-    async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
-        let uri = params.text_document_position.text_document.uri;
-        let position = params.text_document_position.position;
-        let completions = || -> Option<Vec<CompletionItem>> {
-            let rope = self.document_map.get(&uri.to_string())?;
-            let ast = self.ast_map.get(&uri.to_string())?;
-            let char = rope.try_line_to_char(position.line as usize).ok()?;
-            let offset = char + position.character as usize;
-            let completions = completion(&ast, offset);
-            let mut ret = Vec::with_capacity(completions.len());
-            for (_, item) in completions {
-                match item {
-                    logql_language_server::completion::ImCompleteCompletionItem::Variable(var) => {
-                        ret.push(CompletionItem {
-                            label: var.clone(),
-                            insert_text: Some(var.clone()),
-                            kind: Some(CompletionItemKind::VARIABLE),
-                            detail: Some(var),
-                            ..Default::default()
-                        });
-                    }
-                    logql_language_server::completion::ImCompleteCompletionItem::Function(
-                        name,
-                        args,
-                    ) => {
-                        ret.push(CompletionItem {
-                            label: name.clone(),
-                            kind: Some(CompletionItemKind::FUNCTION),
-                            detail: Some(name.clone()),
-                            insert_text: Some(format!(
-                                "{}({})",
-                                name,
-                                args.iter()
-                                    .enumerate()
-                                    .map(|(index, item)| { format!("${{{}:{}}}", index + 1, item) })
-                                    .collect::<Vec<_>>()
-                                    .join(",")
-                            )),
-                            insert_text_format: Some(InsertTextFormat::SNIPPET),
-                            ..Default::default()
-                        });
-                    }
-                }
-            }
-            Some(ret)
-        }();
-        Ok(completions.map(CompletionResponse::Array))
     }
 }
 
