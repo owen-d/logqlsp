@@ -1,6 +1,4 @@
 use dashmap::DashMap;
-use logql_language_server::logql::{parse, Expr, InCompleteSemanticToken};
-use logql_language_server::semantic_tokens::{semantic_token_from_ast, LEGEND_TYPE};
 use ropey::Rope;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -27,13 +25,12 @@ impl LanguageServer for Backend {
                 text_document_sync: Some(TextDocumentSyncCapability::Kind(
                     TextDocumentSyncKind::FULL,
                 )),
-                completion_provider: None,
-                // completion_provider: Some(CompletionOptions {
-                //     resolve_provider: Some(false),
-                //     trigger_characters: Some(vec![".".to_string()]),
-                //     work_done_progress_options: Default::default(),
-                //     all_commit_characters: None,
-                // }),
+                completion_provider: Some(CompletionOptions {
+                    resolve_provider: Some(false),
+                    trigger_characters: Some(vec![".".to_string()]),
+                    work_done_progress_options: Default::default(),
+                    all_commit_characters: None,
+                }),
                 execute_command_provider: Some(ExecuteCommandOptions {
                     commands: vec!["dummy.do_something".to_string()],
                     work_done_progress_options: Default::default(),
