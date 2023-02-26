@@ -1,6 +1,15 @@
 use std::marker::PhantomData;
 
-use nom::IResult;
+use nom::{
+    bytes::complete::{tag, take_until},
+    character::{
+        complete::{char, multispace0, none_of, one_of},
+        is_newline,
+    },
+    error::ParseError,
+    sequence::{delimited, Tuple},
+    IResult,
+};
 
 use super::utils::Span;
 
@@ -21,9 +30,15 @@ pub type Number = Either<i64, f64>;
 pub enum Token {
     // Sequence of chars
     Word(String),
-    // (, ), [, ], {, }, ", `, ,, |, =, ~, !, *, /, +, -, #
+    // (, ), [, ], {, }, ", `, ,, |, =, ~, !, *, /, +, -, #, \n
     Delimiter(Delimited<String>),
 }
+
+pub const SINGLE_CHAR_DELIMITERS: &'static [char] = &[
+    '(', ')', '[', ']', '{', '}', '"', '`', ',', '|', '*', '/', '+', '-', '#', '\n', '=',
+];
+
+pub const MULTI_CHAR_DELIMS: &'static [&'static str] = &["!=", "=~", "!~", "|="];
 
 pub struct Delimited<T> {
     // a type to implement a trait which maps to the valid variants
@@ -43,7 +58,9 @@ pub type Nothing = PhantomData<()>;
 // such as default Resolvers
 pub struct Stubby {}
 
-pub type Result<'a> = IResult<Span<'a>, Token>;
+pub type Result<'a> = IResult<Span<'a>, Vec<Token>>;
+
+pub type LexErr<'a> = nom::error::Error<Span<'a>>;
 
 // ------------------------------ Logic ------------------------------
 fn lex(input: Span) -> Result {
@@ -54,5 +71,24 @@ fn lex(input: Span) -> Result {
     // whitespace -> continue
     // other delim -> delim
     // else it's not a protected char, repeatedly accumulate to string
+    let multi_char_delims = tag::<_, _, LexErr>("foo");
+    let single_char_delimts = one_of::<Span, _, LexErr>(SINGLE_CHAR_DELIMITERS);
+
     todo!()
+}
+
+fn comment(input: Span) -> Result {
+    let (s, (_, comment, _)) = (tag("#"), take_until("\n"), tag("\n")).parse(input)?;
+    todo!()
+}
+
+/// A combinator that takes a parser `inner` and produces a parser that also consumes both leading and
+/// trailing whitespace, returning the output of `inner`.
+fn whitespace<'a, F, O, E: ParseError<&'a str>>(
+    inner: F,
+) -> impl FnMut(&'a str) -> IResult<&'a str, O, E>
+where
+    F: FnMut(&'a str) -> IResult<&'a str, O, E>,
+{
+    delimited(multispace0, inner, multispace0)
 }
