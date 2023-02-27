@@ -3,11 +3,10 @@ use std::marker::PhantomData;
 use nom::{
     branch::alt,
     bytes::complete::{tag, take_until, take_while},
-    character::{
-        complete::{char, multispace0, none_of, one_of},
-        is_alphabetic, is_alphanumeric, is_newline,
-    },
+    character::complete::{char, multispace0, one_of},
+    combinator::eof,
     error::ParseError,
+    multi::many_till,
     sequence::{delimited, Tuple},
     IResult, Parser,
 };
@@ -15,24 +14,35 @@ use nom::{
 use super::utils::Span;
 
 // ------------------------------ Types ------------------------------
-// Example valid input: {job="foo", bar="buzz"} |= "bonk"
 
 // Generally there are two sets of types:
 // One for the lexing stage, and one for the parsing stage.
 // This is for the lexing stage.
-pub enum Either<A, B> {
-    Left(A),
-    Right(B),
-}
-pub type Number = Either<i64, f64>;
 
-// type info:
-// A -> Something to delimit by
+#[derive(Debug, PartialEq)]
 pub enum Token {
     // Sequence of chars
     Word(String),
     // (, ), [, ], {, }, ", `, ,, |, =, ~, !, *, /, +, -, #, \n
     Delimiter(Delimited<String>),
+}
+
+trait Tokenable {
+    fn word(&self) -> Token;
+    fn delimiter(&self) -> Token;
+}
+
+impl Tokenable for &str {
+    fn word(&self) -> Token {
+        Token::Word(self.to_string())
+    }
+
+    fn delimiter(&self) -> Token {
+        Token::Delimiter(Delimited {
+            s: self.to_string(),
+            valid: PhantomData,
+        })
+    }
 }
 
 pub const SINGLE_CHAR_DELIMITERS: &'static [char] = &[
@@ -41,9 +51,11 @@ pub const SINGLE_CHAR_DELIMITERS: &'static [char] = &[
 
 pub const MULTI_CHAR_DELIMS: &'static [&'static str] = &["!=", "=~", "!~", "|="];
 
+#[derive(Debug, PartialEq)]
 pub struct Delimited<T> {
     s: String,
     // a type to implement a trait which maps to the valid variants
+    // TBD if this is necessary
     pub(crate) valid: PhantomData<T>,
 }
 
@@ -66,13 +78,7 @@ pub type LexErr<'a> = nom::error::Error<Span<'a>>;
 
 // ------------------------------ Logic ------------------------------
 fn lex(input: Span) -> Result {
-    // Word|Delimiter
-    // # -> any until end of line or document
-    // todo(owen-d): implemente escaped strings
-    // str_delims -> parse until closing delim
-    // whitespace -> continue
-    // other delim -> delim
-    // else it's not a protected char, repeatedly accumulate to string
+    // todo(owen-d): implement escaped strings
 
     let multi_char_delims = alt::<Span, _, LexErr, _>((tag("!="), tag("=~"), tag("!~"), tag("|=")))
         .map(|s| {
@@ -98,7 +104,10 @@ fn lex(input: Span) -> Result {
         word,
     )));
 
-    token(input)
+    let mut tokens =
+        many_till(token, eof).map(|(toks, _)| toks.into_iter().flatten().collect::<Vec<Token>>());
+
+    tokens.parse(input)
 }
 
 fn string(input: Span) -> Result {
@@ -150,4 +159,31 @@ where
     E: ParseError<I>,
 {
     delimited(multispace0, inner, multispace0)
+}
+
+#[test]
+fn test_input() {
+    let input = Span::new(r#"{foo="bar", bazz!="buzz"} |= "bonk""#);
+    let (s, toks) = lex(input).unwrap();
+    assert_eq!("", *s.fragment());
+    let expected_toks: Vec<Token> = vec![
+        "{".delimiter(),
+        "foo".word(),
+        "=".delimiter(),
+        "\"".delimiter(),
+        "bar".word(),
+        "\"".delimiter(),
+        ",".delimiter(),
+        "bazz".word(),
+        "!=".delimiter(),
+        "\"".delimiter(),
+        "buzz".word(),
+        "\"".delimiter(),
+        "}".delimiter(),
+        "|=".delimiter(),
+        "\"".delimiter(),
+        "bonk".word(),
+        "\"".delimiter(),
+    ];
+    assert_eq!(expected_toks, toks)
 }
