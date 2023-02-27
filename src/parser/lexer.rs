@@ -2,14 +2,15 @@ use std::marker::PhantomData;
 
 use nom::{
     branch::alt,
-    bytes::complete::{tag, take_until, take_while},
-    character::complete::{char, multispace0, one_of},
+    bytes::complete::{escaped, tag, take_until, take_while},
+    character::complete::{multispace0, one_of},
     combinator::eof,
     error::ParseError,
     multi::many_till,
     sequence::{delimited, Tuple},
-    IResult, Parser,
+    IResult,
 };
+use nom::{InputTakeAtPosition, Parser};
 
 use super::utils::Span;
 
@@ -21,15 +22,19 @@ use super::utils::Span;
 
 #[derive(Debug, PartialEq)]
 pub enum Token {
+    // String, may include escaped characters
+    String(String),
     // Sequence of chars
     Word(String),
     // (, ), [, ], {, }, ", `, ,, |, =, ~, !, *, /, +, -, #, \n
     Delimiter(Delimited<String>),
 }
 
+// Helper trait to make it easier to create tokens
 trait Tokenable {
     fn word(&self) -> Token;
     fn delimiter(&self) -> Token;
+    fn string_tok(&self, delim: &str) -> Token;
 }
 
 impl Tokenable for &str {
@@ -42,6 +47,27 @@ impl Tokenable for &str {
             s: self.to_string(),
             valid: PhantomData,
         })
+    }
+
+    fn string_tok(&self, delim: &str) -> Token {
+        Token::String(format!("{}{}{}", delim, self.to_string(), delim))
+    }
+}
+
+impl Tokenable for char {
+    fn word(&self) -> Token {
+        Token::Word(self.to_string())
+    }
+
+    fn delimiter(&self) -> Token {
+        Token::Delimiter(Delimited {
+            s: self.to_string(),
+            valid: PhantomData,
+        })
+    }
+
+    fn string_tok(&self, delim: &str) -> Token {
+        Token::String(format!("{}{}{}", delim, self.to_string(), delim))
     }
 }
 
@@ -73,7 +99,6 @@ pub type Nothing = PhantomData<()>;
 pub struct Stubby {}
 
 pub type Result<'a> = IResult<Span<'a>, Vec<Token>>;
-
 pub type LexErr<'a> = nom::error::Error<Span<'a>>;
 
 // ------------------------------ Logic ------------------------------
@@ -81,19 +106,10 @@ fn lex(input: Span) -> Result {
     // todo(owen-d): implement escaped strings
 
     let multi_char_delims = alt::<Span, _, LexErr, _>((tag("!="), tag("=~"), tag("!~"), tag("|=")))
-        .map(|s| {
-            vec![Token::Delimiter(Delimited {
-                s: s.to_string(),
-                valid: PhantomData,
-            })]
-        });
+        .map(|s| vec![s.delimiter()]);
 
-    let single_char_delims = one_of::<Span, _, LexErr>(SINGLE_CHAR_DELIMITERS).map(|c| {
-        vec![Token::Delimiter(Delimited {
-            s: c.to_string(),
-            valid: PhantomData,
-        })]
-    });
+    let single_char_delims =
+        one_of::<Span, _, LexErr>(SINGLE_CHAR_DELIMITERS).map(|c| vec![c.delimiter()]);
 
     // listed in terms of parsing precedence
     let token = whitespaced(alt((
@@ -110,43 +126,38 @@ fn lex(input: Span) -> Result {
     tokens.parse(input)
 }
 
+fn except_control_or_quote<T, E: ParseError<T>>(input: T) -> IResult<T, T, E>
+where
+    T: nom::InputTakeAtPosition,
+    <T as nom::InputTakeAtPosition>::Item: nom::AsChar,
+    <T as nom::InputTakeAtPosition>::Item: PartialEq<char>,
+{
+    input.split_at_position1_complete(
+        |item| item == '"' || item == '\\',
+        nom::error::ErrorKind::Escaped,
+    )
+}
+
 fn string(input: Span) -> Result {
-    let (s, (_, string, _)) = (char('"'), take_until("\""), char('"')).parse(input)?;
-    Ok((
-        s,
-        vec![
-            Token::Delimiter(Delimited {
-                s: "\"".to_string(),
-                valid: PhantomData,
-            }),
-            Token::Word(string.to_string()),
-            Token::Delimiter(Delimited {
-                s: "\"".to_string(),
-                valid: PhantomData,
-            }),
-        ],
-    ))
+    let mut p = (
+        tag(r#"""#),
+        escaped(except_control_or_quote, '\\', one_of(r#""n\"#)),
+        tag(r#"""#),
+    );
+    let (s, (_, x, _)) = p.parse(input)?;
+    Ok((s, vec![x.string_tok("\"")]))
 }
 
 fn word(input: Span) -> Result {
     let is_valid = |c: char| c.is_alphanumeric() || c == '_';
     take_while(is_valid)
-        .map(|c: Span| vec![Token::Word(c.to_string())])
+        .map(|c: Span| vec![c.word()])
         .parse(input)
 }
 
 fn comment(input: Span) -> Result {
     let (s, (_, comment, _)) = (tag("#"), take_until("\n"), tag("\n")).parse(input)?;
-    Ok((
-        s,
-        vec![
-            Token::Delimiter(Delimited {
-                s: "#".to_string(),
-                valid: PhantomData,
-            }),
-            Token::Word(comment.to_string()),
-        ],
-    ))
+    Ok((s, vec!["#".delimiter(), comment.word(), "\n".delimiter()]))
 }
 
 /// A combinator that takes a parser `inner` and produces a parser that also consumes both leading and
@@ -161,6 +172,39 @@ where
     delimited(multispace0, inner, multispace0)
 }
 
+#[cfg(test)]
+#[test]
+fn test_string() {
+    let input = Span::new(r#""foo""#);
+    let (s, toks) = string(input).unwrap();
+    assert_eq!("", *s.fragment());
+    let expected_toks: Vec<Token> = vec![Token::String("\"foo\"".to_string())];
+    assert_eq!(expected_toks, toks)
+}
+
+#[cfg(test)]
+#[test]
+fn test_except_control_or_quote() {
+    let input = Span::new(r#"foo bar""#);
+    let (s, (a, b)) = (
+        except_control_or_quote::<_, nom::error::Error<_>>,
+        tag("\""),
+    )
+        .parse(input)
+        .unwrap();
+    assert_eq!("", *s.fragment());
+    assert_eq!("foo bar", *a.fragment());
+    assert_eq!("\"", *b.fragment());
+
+    fn esc(s: &str) -> IResult<&str, &str> {
+        escaped(except_control_or_quote, '\\', one_of(r#""n\"#))(s)
+    }
+    assert_eq!(esc("123;"), Ok(("", "123;")));
+    let mut surrounded = (tag("\""), esc, tag("\""));
+    assert_eq!(surrounded.parse(r#""abc""#), Ok(("", ("\"", "abc", "\""))));
+}
+
+#[cfg(test)]
 #[test]
 fn test_input() {
     let input = Span::new(r#"{foo="bar", bazz!="buzz"} |= "bonk""#);
@@ -185,5 +229,15 @@ fn test_input() {
         "bonk".word(),
         "\"".delimiter(),
     ];
+    assert_eq!(expected_toks, toks)
+}
+
+#[cfg(test)]
+#[test]
+fn test_input_err() {
+    let input = Span::new(r#"{foo="bar"#);
+    let (s, toks) = lex(input).unwrap();
+    assert_eq!("", *s.fragment());
+    let expected_toks: Vec<Token> = vec![];
     assert_eq!(expected_toks, toks)
 }
