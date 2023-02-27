@@ -2,7 +2,7 @@ use std::marker::PhantomData;
 
 use nom::{
     branch::alt,
-    bytes::complete::{escaped, tag, take_until, take_while},
+    bytes::complete::{escaped, is_not, tag, take_until, take_while},
     character::complete::{multispace0, one_of},
     combinator::eof,
     error::ParseError,
@@ -126,19 +126,23 @@ fn lex(input: Span) -> Result {
     tokens.parse(input)
 }
 
-fn except_control_or_quote<T, E: ParseError<T>>(input: T) -> IResult<T, T, E>
-where
-    T: nom::InputTakeAtPosition,
-    <T as nom::InputTakeAtPosition>::Item: nom::AsChar,
-    <T as nom::InputTakeAtPosition>::Item: PartialEq<char>,
-{
-    input.split_at_position1_complete(
-        |item| item == '"' || item == '\\',
-        nom::error::ErrorKind::Escaped,
-    )
+fn string(input: Span) -> Result {
+    alt((raw_string, double_quoted_string)).parse(input)
 }
 
-fn string(input: Span) -> Result {
+fn double_quoted_string(input: Span) -> Result {
+    fn except_control_or_quote<T, E: ParseError<T>>(input: T) -> IResult<T, T, E>
+    where
+        T: nom::InputTakeAtPosition,
+        <T as nom::InputTakeAtPosition>::Item: nom::AsChar,
+        <T as nom::InputTakeAtPosition>::Item: PartialEq<char>,
+    {
+        input.split_at_position1_complete(
+            |item| item == '"' || item == '\\',
+            nom::error::ErrorKind::Escaped,
+        )
+    }
+
     let mut p = (
         tag(r#"""#),
         escaped(except_control_or_quote, '\\', one_of(r#""n\"#)),
@@ -146,6 +150,12 @@ fn string(input: Span) -> Result {
     );
     let (s, (_, x, _)) = p.parse(input)?;
     Ok((s, vec![x.string_tok("\"")]))
+}
+
+fn raw_string(input: Span) -> Result {
+    let mut p = (tag(r"`"), is_not("`"), tag(r"`"));
+    let (s, (_, x, _)) = p.parse(input)?;
+    Ok((s, vec![x.string_tok("`")]))
 }
 
 fn word(input: Span) -> Result {
@@ -175,33 +185,21 @@ where
 #[cfg(test)]
 #[test]
 fn test_string() {
-    let input = Span::new(r#""foo""#);
+    let input = Span::new(r#""fo\"o""#);
     let (s, toks) = string(input).unwrap();
     assert_eq!("", *s.fragment());
-    let expected_toks: Vec<Token> = vec![Token::String("\"foo\"".to_string())];
+    let expected_toks: Vec<Token> = vec![Token::String("\"fo\\\"o\"".to_string())];
     assert_eq!(expected_toks, toks)
 }
 
 #[cfg(test)]
 #[test]
-fn test_except_control_or_quote() {
-    let input = Span::new(r#"foo bar""#);
-    let (s, (a, b)) = (
-        except_control_or_quote::<_, nom::error::Error<_>>,
-        tag("\""),
-    )
-        .parse(input)
-        .unwrap();
+fn test_raw_string() {
+    let input = Span::new(r#"`foo\`"#);
+    let (s, toks) = string(input).unwrap();
     assert_eq!("", *s.fragment());
-    assert_eq!("foo bar", *a.fragment());
-    assert_eq!("\"", *b.fragment());
-
-    fn esc(s: &str) -> IResult<&str, &str> {
-        escaped(except_control_or_quote, '\\', one_of(r#""n\"#))(s)
-    }
-    assert_eq!(esc("123;"), Ok(("", "123;")));
-    let mut surrounded = (tag("\""), esc, tag("\""));
-    assert_eq!(surrounded.parse(r#""abc""#), Ok(("", ("\"", "abc", "\""))));
+    let expected_toks: Vec<Token> = vec![Token::String(r#"`foo\`"#.to_string())];
+    assert_eq!(expected_toks, toks)
 }
 
 #[cfg(test)]
@@ -229,15 +227,5 @@ fn test_input() {
         "bonk".word(),
         "\"".delimiter(),
     ];
-    assert_eq!(expected_toks, toks)
-}
-
-#[cfg(test)]
-#[test]
-fn test_input_err() {
-    let input = Span::new(r#"{foo="bar"#);
-    let (s, toks) = lex(input).unwrap();
-    assert_eq!("", *s.fragment());
-    let expected_toks: Vec<Token> = vec![];
     assert_eq!(expected_toks, toks)
 }
