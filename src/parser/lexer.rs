@@ -205,27 +205,25 @@ fn test_raw_string() {
 #[cfg(test)]
 #[test]
 fn test_input() {
-    let input = Span::new(r#"{foo="bar", bazz!="buzz"} |= "bonk""#);
+    let input = Span::new(r#"{foo="bar", bazz!="buzz"} |= "bonk" |= `\n` |= "sno\"t " "#);
     let (s, toks) = lex(input).unwrap();
     assert_eq!("", *s.fragment());
     let expected_toks: Vec<Token> = vec![
         "{".delimiter(),
         "foo".word(),
         "=".delimiter(),
-        "\"".delimiter(),
-        "bar".word(),
-        "\"".delimiter(),
+        "bar".string_tok("\""),
         ",".delimiter(),
         "bazz".word(),
         "!=".delimiter(),
-        "\"".delimiter(),
-        "buzz".word(),
-        "\"".delimiter(),
+        "buzz".string_tok("\""),
         "}".delimiter(),
         "|=".delimiter(),
-        "\"".delimiter(),
-        "bonk".word(),
-        "\"".delimiter(),
+        r#"bonk"#.string_tok("\""),
+        "|=".delimiter(),
+        r#"\n"#.string_tok("`"),
+        "|=".delimiter(),
+        "sno\\\"t ".string_tok("\""),
     ];
     assert_eq!(expected_toks, toks)
 }
