@@ -4,10 +4,10 @@ use nom::{
     branch::alt,
     bytes::complete::{escaped, is_not, tag, take_until, take_while},
     character::complete::{multispace0, one_of},
-    combinator::eof,
+    combinator::{eof, map},
     error::ParseError,
     multi::many_till,
-    sequence::{delimited, Tuple},
+    sequence::{delimited, preceded, terminated, Tuple},
     IResult,
 };
 use nom::{InputTakeAtPosition, Parser};
@@ -22,6 +22,7 @@ use super::utils::Span;
 
 #[derive(Debug, PartialEq)]
 pub enum Token {
+    Comment(String),
     // String, may include escaped characters
     String(String),
     // Sequence of chars
@@ -35,6 +36,7 @@ trait Tokenable {
     fn word(&self) -> Token;
     fn delimiter(&self) -> Token;
     fn string_tok(&self, delim: &str) -> Token;
+    fn comment(&self) -> Token;
 }
 
 impl Tokenable for &str {
@@ -52,6 +54,9 @@ impl Tokenable for &str {
     fn string_tok(&self, delim: &str) -> Token {
         Token::String(format!("{}{}{}", delim, self.to_string(), delim))
     }
+    fn comment(&self) -> Token {
+        Token::Comment(format!("#{}", self.to_string()))
+    }
 }
 
 impl Tokenable for char {
@@ -68,6 +73,10 @@ impl Tokenable for char {
 
     fn string_tok(&self, delim: &str) -> Token {
         Token::String(format!("{}{}{}", delim, self.to_string(), delim))
+    }
+
+    fn comment(&self) -> Token {
+        Token::Comment(format!("#{}", self.to_string()))
     }
 }
 
@@ -166,8 +175,12 @@ fn word(input: Span) -> Result {
 }
 
 fn comment(input: Span) -> Result {
-    let (s, (_, comment, _)) = (tag("#"), take_until("\n"), tag("\n")).parse(input)?;
-    Ok((s, vec!["#".delimiter(), comment.word(), "\n".delimiter()]))
+    terminated(
+        preceded(tag("#"), take_while(|c| c != '\n')),
+        alt((tag("\n"), eof)),
+    )
+    .map(|c: Span| vec![c.comment()])
+    .parse(input)
 }
 
 /// A combinator that takes a parser `inner` and produces a parser that also consumes both leading and
@@ -205,7 +218,10 @@ fn test_raw_string() {
 #[cfg(test)]
 #[test]
 fn test_input() {
-    let input = Span::new(r#"{foo="bar", bazz!="buzz"} |= "bonk" |= `\n` |= "sno\"t " "#);
+    let input = Span::new(
+        r#"{foo="bar", bazz!="buzz"} |= "bonk" |= `\n` |= "sno\"t " # foo|bar"
+        #final"#,
+    );
     let (s, toks) = lex(input).unwrap();
     assert_eq!("", *s.fragment());
     let expected_toks: Vec<Token> = vec![
@@ -224,6 +240,8 @@ fn test_input() {
         r#"\n"#.string_tok("`"),
         "|=".delimiter(),
         "sno\\\"t ".string_tok("\""),
+        " foo|bar\"".comment(),
+        "final".comment(),
     ];
     assert_eq!(expected_toks, toks)
 }
