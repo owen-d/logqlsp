@@ -8,11 +8,12 @@ use nom::{
     error::ParseError,
     multi::many_till,
     sequence::{delimited, preceded, terminated, Tuple},
-    IResult,
+    IResult, InputIter,
 };
 use nom::{InputTakeAtPosition, Parser};
+use nom_locate::position;
 
-use super::utils::Span;
+use super::utils::{id, Span, Spanned};
 
 // ------------------------------ Types ------------------------------
 
@@ -107,18 +108,28 @@ pub type Nothing = PhantomData<()>;
 // such as default Resolvers
 pub struct Stubby {}
 
-pub type Result<'a> = IResult<Span<'a>, Vec<Token>>;
+pub type Result<'a> = IResult<Span<'a>, Spanned<'a, Token>>;
 pub type LexErr<'a> = nom::error::Error<Span<'a>>;
 
 // ------------------------------ Logic ------------------------------
-fn lex(input: Span) -> Result {
+fn lex<'a>(input: Span<'a>) -> IResult<Span<'a>, Vec<Spanned<'a, Token>>> {
     // todo(owen-d): implement escaped strings
 
-    let multi_char_delims = alt::<Span, _, LexErr, _>((tag("!="), tag("=~"), tag("!~"), tag("|=")))
-        .map(|s| vec![s.delimiter()]);
+    let multi_char_delims = |s| {
+        spanned(
+            |x| x.delimiter(),
+            alt::<Span, _, LexErr, _>((tag("!="), tag("=~"), tag("!~"), tag("|="))),
+        )
+        .parse(s)
+    };
 
-    let single_char_delims =
-        one_of::<Span, _, LexErr>(SINGLE_CHAR_DELIMITERS).map(|c| vec![c.delimiter()]);
+    let single_char_delims = |s| {
+        spanned(
+            |x| x.delimiter(),
+            one_of::<Span, _, LexErr>(SINGLE_CHAR_DELIMITERS),
+        )
+        .parse(s)
+    };
 
     // listed in terms of parsing precedence
     let token = whitespaced(alt((
@@ -130,7 +141,7 @@ fn lex(input: Span) -> Result {
     )));
 
     let mut tokens =
-        many_till(token, eof).map(|(toks, _)| toks.into_iter().flatten().collect::<Vec<Token>>());
+        many_till(token, eof).map(|(toks, _)| toks.into_iter().collect::<Vec<Spanned<Token>>>());
 
     tokens.parse(input)
 }
@@ -143,7 +154,6 @@ fn double_quoted_string(input: Span) -> Result {
     fn except_control_or_quote<T, E: ParseError<T>>(input: T) -> IResult<T, T, E>
     where
         T: nom::InputTakeAtPosition,
-        <T as nom::InputTakeAtPosition>::Item: nom::AsChar,
         <T as nom::InputTakeAtPosition>::Item: PartialEq<char>,
     {
         input.split_at_position1_complete(
@@ -152,35 +162,55 @@ fn double_quoted_string(input: Span) -> Result {
         )
     }
 
-    let mut p = (
-        tag(r#"""#),
-        escaped(except_control_or_quote, '\\', one_of(r#""n\"#)),
-        tag(r#"""#),
-    );
-    let (s, (_, x, _)) = p.parse(input)?;
-    Ok((s, vec![x.string_tok("\"")]))
+    fn parse<'a>(i: Span<'a>) -> IResult<Span<'a>, (Span<'a>, Span<'a>, Span<'a>)> {
+        (
+            tag(r#"""#),
+            escaped(except_control_or_quote, '\\', one_of(r#""n\"#)),
+            tag(r#"""#),
+        )
+            .parse(i)
+    }
+
+    spanned(|(_, x, _)| x.string_tok("\""), parse).parse(input)
 }
 
 fn raw_string(input: Span) -> Result {
-    let mut p = (tag(r"`"), is_not("`"), tag(r"`"));
-    let (s, (_, x, _)) = p.parse(input)?;
-    Ok((s, vec![x.string_tok("`")]))
+    fn parse<'a>(i: Span<'a>) -> IResult<Span<'a>, (Span<'a>, Span<'a>, Span<'a>)> {
+        (tag(r"`"), is_not("`"), tag(r"`")).parse(i)
+    }
+
+    spanned(|(_, x, _)| x.string_tok("`"), parse).parse(input)
 }
 
 fn word(input: Span) -> Result {
     let is_valid = |c: char| c.is_alphanumeric() || c == '_';
-    take_while(is_valid)
-        .map(|c: Span| vec![c.word()])
-        .parse(input)
+    spanned(|x: Span| x.word(), take_while(is_valid)).parse(input)
 }
 
 fn comment(input: Span) -> Result {
-    terminated(
-        preceded(tag("#"), take_while(|c| c != '\n')),
-        alt((tag("\n"), eof)),
+    spanned(
+        |x| x.comment(),
+        terminated(
+            preceded(tag::<_, Span, _>("#"), take_while(|c| c != '\n')),
+            alt((tag("\n"), eof)),
+        ),
     )
-    .map(|c: Span| vec![c.comment()])
     .parse(input)
+}
+
+// Run a parser, extracting the position and mapping the result
+fn spanned<I, O, O2, E, P, F>(mut f: F, mut p: P) -> impl FnMut(I) -> IResult<I, (I, O2), E>
+where
+    P: Parser<I, O, E>,
+    E: nom::error::ParseError<I>,
+    I: nom::InputTake + nom::InputIter,
+    F: FnMut(O) -> O2,
+{
+    move |s| {
+        let (s, pos) = position(s)?;
+        let (s, x) = p.parse(s)?;
+        Ok((s, (pos, f(x))))
+    }
 }
 
 /// A combinator that takes a parser `inner` and produces a parser that also consumes both leading and
@@ -199,20 +229,20 @@ where
 #[test]
 fn test_string() {
     let input = Span::new(r#""fo\"o""#);
-    let (s, toks) = string(input).unwrap();
+    let (s, tok) = string(input).unwrap();
     assert_eq!("", *s.fragment());
-    let expected_toks: Vec<Token> = vec![Token::String("\"fo\\\"o\"".to_string())];
-    assert_eq!(expected_toks, toks)
+    let expected_tok = Token::String("\"fo\\\"o\"".to_string());
+    assert_eq!(expected_tok, tok.1)
 }
 
 #[cfg(test)]
 #[test]
 fn test_raw_string() {
     let input = Span::new(r#"`foo\`"#);
-    let (s, toks) = string(input).unwrap();
+    let (s, tok) = string(input).unwrap();
     assert_eq!("", *s.fragment());
-    let expected_toks: Vec<Token> = vec![Token::String(r#"`foo\`"#.to_string())];
-    assert_eq!(expected_toks, toks)
+    let expected_tok: Token = Token::String(r#"`foo\`"#.to_string());
+    assert_eq!(expected_tok, tok.1)
 }
 
 #[cfg(test)]
@@ -243,5 +273,8 @@ fn test_input() {
         " foo|bar\"".comment(),
         "final".comment(),
     ];
-    assert_eq!(expected_toks, toks)
+    assert_eq!(
+        expected_toks,
+        toks.into_iter().map(|(_, x)| x).collect::<Vec<Token>>()
+    )
 }

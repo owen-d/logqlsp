@@ -6,7 +6,7 @@ use tower_lsp::lsp_types::CompletionItem;
 
 pub type Span<'a> = LocatedSpan<&'a str>;
 //  Alias for colocating a span with some <T>
-pub type Spanned<'a, T> = (T, Span<'a>);
+pub type Spanned<'a, T> = (Span<'a>, T);
 
 // For use somewhere down the line
 #[derive(Debug, Clone)]
@@ -25,4 +25,8 @@ impl<E> SuggestiveError<E> {
     pub fn new(err: E, completions: Option<Vec<CompletionItem>>) -> Self {
         Self { err, completions }
     }
+}
+
+pub fn id<A>(x: A) -> A {
+    x
 }
