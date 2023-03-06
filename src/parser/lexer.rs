@@ -1,5 +1,6 @@
 use std::marker::PhantomData;
 
+use nom::error::VerboseError;
 use nom::{
     branch::alt,
     bytes::complete::{escaped, is_not, tag, take_until, take_while},
@@ -108,28 +109,24 @@ pub type Nothing = PhantomData<()>;
 // such as default Resolvers
 pub struct Stubby {}
 
-pub type Result<'a> = IResult<Span<'a>, Spanned<'a, Token>>;
-pub type LexErr<'a> = nom::error::Error<Span<'a>>;
+pub type Result<'a, E> = IResult<Span<'a>, Spanned<'a, Token>, E>;
 
 // ------------------------------ Logic ------------------------------
-fn lex<'a>(input: Span<'a>) -> IResult<Span<'a>, Vec<Spanned<'a, Token>>> {
+fn lex<'a, E: ParseError<Span<'a>>>(
+    input: Span<'a>,
+) -> IResult<Span<'a>, Vec<Spanned<'a, Token>>, E> {
     // todo(owen-d): implement escaped strings
 
     let multi_char_delims = |s| {
         spanned(
             |x| x.delimiter(),
-            alt::<Span, _, LexErr, _>((tag("!="), tag("=~"), tag("!~"), tag("|="))),
+            alt::<Span, _, _, _>((tag("!="), tag("=~"), tag("!~"), tag("|="))),
         )
         .parse(s)
     };
 
-    let single_char_delims = |s| {
-        spanned(
-            |x| x.delimiter(),
-            one_of::<Span, _, LexErr>(SINGLE_CHAR_DELIMITERS),
-        )
-        .parse(s)
-    };
+    let single_char_delims =
+        |s| spanned(|x| x.delimiter(), one_of(SINGLE_CHAR_DELIMITERS)).parse(s);
 
     // listed in terms of parsing precedence
     let token = whitespaced(alt((
@@ -146,11 +143,11 @@ fn lex<'a>(input: Span<'a>) -> IResult<Span<'a>, Vec<Spanned<'a, Token>>> {
     tokens.parse(input)
 }
 
-fn string(input: Span) -> Result {
+fn string<'a, E: ParseError<Span<'a>>>(input: Span<'a>) -> Result<E> {
     alt((raw_string, double_quoted_string)).parse(input)
 }
 
-fn double_quoted_string(input: Span) -> Result {
+fn double_quoted_string<'a, E: ParseError<Span<'a>>>(input: Span<'a>) -> Result<E> {
     fn except_control_or_quote<T, E: ParseError<T>>(input: T) -> IResult<T, T, E>
     where
         T: nom::InputTakeAtPosition,
@@ -162,7 +159,9 @@ fn double_quoted_string(input: Span) -> Result {
         )
     }
 
-    fn parse<'a>(i: Span<'a>) -> IResult<Span<'a>, (Span<'a>, Span<'a>, Span<'a>)> {
+    fn parse<'a, E: ParseError<Span<'a>>>(
+        i: Span<'a>,
+    ) -> IResult<Span<'a>, (Span<'a>, Span<'a>, Span<'a>), E> {
         (
             tag(r#"""#),
             escaped(except_control_or_quote, '\\', one_of(r#""n\"#)),
@@ -174,20 +173,22 @@ fn double_quoted_string(input: Span) -> Result {
     spanned(|(_, x, _)| x.string_tok("\""), parse).parse(input)
 }
 
-fn raw_string(input: Span) -> Result {
-    fn parse<'a>(i: Span<'a>) -> IResult<Span<'a>, (Span<'a>, Span<'a>, Span<'a>)> {
+fn raw_string<'a, E: ParseError<Span<'a>>>(input: Span<'a>) -> Result<E> {
+    fn parse<'a, E: ParseError<Span<'a>>>(
+        i: Span<'a>,
+    ) -> IResult<Span<'a>, (Span<'a>, Span<'a>, Span<'a>), E> {
         (tag(r"`"), is_not("`"), tag(r"`")).parse(i)
     }
 
     spanned(|(_, x, _)| x.string_tok("`"), parse).parse(input)
 }
 
-fn word(input: Span) -> Result {
+fn word<'a, E: ParseError<Span<'a>>>(input: Span<'a>) -> Result<E> {
     let is_valid = |c: char| c.is_alphanumeric() || c == '_';
     spanned(|x: Span| x.word(), take_while(is_valid)).parse(input)
 }
 
-fn comment(input: Span) -> Result {
+fn comment<'a, E: ParseError<Span<'a>>>(input: Span<'a>) -> Result<E> {
     spanned(
         |x| x.comment(),
         terminated(
@@ -229,7 +230,7 @@ where
 #[test]
 fn test_string() {
     let input = Span::new(r#""fo\"o""#);
-    let (s, tok) = string(input).unwrap();
+    let (s, tok) = string::<VerboseError<Span>>(input).unwrap();
     assert_eq!("", *s.fragment());
     let expected_tok = Token::String("\"fo\\\"o\"".to_string());
     assert_eq!(expected_tok, tok.1)
@@ -239,7 +240,7 @@ fn test_string() {
 #[test]
 fn test_raw_string() {
     let input = Span::new(r#"`foo\`"#);
-    let (s, tok) = string(input).unwrap();
+    let (s, tok) = string::<VerboseError<Span>>(input).unwrap();
     assert_eq!("", *s.fragment());
     let expected_tok: Token = Token::String(r#"`foo\`"#.to_string());
     assert_eq!(expected_tok, tok.1)
@@ -252,7 +253,7 @@ fn test_input() {
         r#"{foo="bar", bazz!="buzz"} |= "bonk" |= `\n` |= "sno\"t " # foo|bar"
         #final"#,
     );
-    let (s, toks) = lex(input).unwrap();
+    let (s, toks) = lex::<VerboseError<Span>>(input).unwrap();
     assert_eq!("", *s.fragment());
     let expected_toks: Vec<Token> = vec![
         "{".delimiter(),
