@@ -1,6 +1,6 @@
 use std::iter::Enumerate;
 use std::marker::PhantomData;
-use std::slice::Iter;
+use std::slice::{self, Iter};
 use std::vec;
 
 use nom::error::VerboseError;
@@ -14,7 +14,7 @@ use nom::{
     sequence::{delimited, preceded, terminated, Tuple},
     IResult, InputIter,
 };
-use nom::{InputTakeAtPosition, Needed, Parser};
+use nom::{Compare, InputLength, InputTake, InputTakeAtPosition, Needed, Parser};
 use nom_locate::position;
 
 use super::utils::{id, spanned, Span, Spanned};
@@ -34,6 +34,13 @@ pub enum Token {
     Word(String),
     // (, ), [, ], {, }, ", `, ,, |, =, ~, !, *, /, +, -, #, \n
     Delimiter(Delimited<String>),
+}
+
+impl InputLength for Token {
+    // tokens in a token-stream always have len=1
+    fn input_len(&self) -> usize {
+        1
+    }
 }
 
 // Helper trait to make it easier to create tokens
@@ -114,20 +121,55 @@ pub struct Stubby {}
 
 pub type Result<'a, E> = IResult<Span<'a>, Spanned<'a, Token>, E>;
 
-pub(crate) struct TokenStream<'a>(Vec<Spanned<'a, Token>>);
+#[derive(Clone)]
+pub(crate) struct TokenStream<'a>(&'a [Spanned<'a, Token>]);
+
+// helper trait for dequeing first token
+pub(crate) trait Head {
+    type Item;
+    fn head(&self) -> Option<Self::Item>;
+}
+
+impl<'a> Head for TokenStream<'a> {
+    type Item = Spanned<'a, Token>;
+
+    fn head(&self) -> Option<Self::Item> {
+        self.0.get(0).map(|x| *x)
+    }
+}
+
+impl<'a> Compare<Token> for TokenStream<'a> {
+    fn compare(&self, t: Token) -> nom::CompareResult {
+        match self.0.get(0) {
+            Some((_, x)) if *x == t => nom::CompareResult::Ok,
+            Some(_) => nom::CompareResult::Error,
+            None => nom::CompareResult::Incomplete,
+        }
+    }
+
+    fn compare_no_case(&self, t: Token) -> nom::CompareResult {
+        self.compare(t)
+    }
+}
+
 impl<'a> InputIter for TokenStream<'a> {
     type Item = Spanned<'a, Token>;
 
-    type Iter = Enumerate<std::vec::IntoIter<Self::Item>>;
+    type Iter = TokenIndices<'a>;
 
-    type IterElem = std::vec::IntoIter<Self::Item>;
+    type IterElem = TokenIter<'a>;
 
     fn iter_indices(&self) -> Self::Iter {
-        self.0.clone().into_iter().enumerate()
+        TokenIndices {
+            offset: 0,
+            iter: self.iter_elements(),
+        }
     }
 
     fn iter_elements(&self) -> Self::IterElem {
-        self.0.clone().into_iter()
+        TokenIter {
+            iter: self.0.iter(),
+        }
     }
 
     fn position<P>(&self, predicate: P) -> Option<usize>
@@ -142,7 +184,7 @@ impl<'a> InputIter for TokenStream<'a> {
         None
     }
 
-    fn slice_index(&self, count: usize) -> std::result::Result<usize, nom::Needed> {
+    fn slice_index(&self, count: usize) -> std::result::Result<usize, Needed> {
         let mut cnt = 0;
         for (index, _) in self.iter_indices() {
             if cnt == count {
@@ -154,6 +196,50 @@ impl<'a> InputIter for TokenStream<'a> {
             return Ok(self.0.len());
         }
         Err(Needed::Unknown)
+    }
+}
+
+impl InputTake for TokenStream<'_> {
+    fn take(&self, count: usize) -> Self {
+        Self(&self.0[..count])
+    }
+
+    fn take_split(&self, count: usize) -> (Self, Self) {
+        let prefix = self.take(count);
+        let suffix = Self(&self.0[count..]);
+        (suffix, prefix)
+    }
+}
+
+pub struct TokenIter<'a> {
+    iter: slice::Iter<'a, Spanned<'a, Token>>,
+}
+
+impl<'a> Iterator for TokenIter<'a> {
+    type Item = Spanned<'a, Token>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iter.next().map(|x| x.clone())
+    }
+}
+
+pub struct TokenIndices<'a> {
+    offset: usize,
+    iter: TokenIter<'a>,
+}
+
+impl<'a> Iterator for TokenIndices<'a> {
+    type Item = (usize, Spanned<'a, Token>);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.iter.next() {
+            None => None,
+            Some(ch) => {
+                let index = self.offset;
+                self.offset += 1;
+                Some((index, ch))
+            }
+        }
     }
 }
 
