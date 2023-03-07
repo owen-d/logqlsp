@@ -1,0 +1,19 @@
+convert_error(input, e)
+context()
+ParseError trait
+finish
+nom-supreme gives ErrorTree<T>, which is `alt`-aware VerboseError<T>
+Can impl ParseError trait if need more control: https://github.com/rust-bakery/nom/blob/main/doc/error_management.md
+
+# Expected errors
+{job!"foo"}
+    | expected one of (=, !=, =~, !~)
+ | while building matcher
+ | while building matchers
+| while building selector
+| while building logSelectorExpr
+| while building expr
+
+# Parsers to make
+
+|=, etc = filter

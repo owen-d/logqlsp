@@ -1,4 +1,7 @@
+use std::iter::Enumerate;
 use std::marker::PhantomData;
+use std::slice::Iter;
+use std::vec;
 
 use nom::error::VerboseError;
 use nom::{
@@ -11,10 +14,10 @@ use nom::{
     sequence::{delimited, preceded, terminated, Tuple},
     IResult, InputIter,
 };
-use nom::{InputTakeAtPosition, Parser};
+use nom::{InputTakeAtPosition, Needed, Parser};
 use nom_locate::position;
 
-use super::utils::{id, Span, Spanned};
+use super::utils::{id, spanned, Span, Spanned};
 
 // ------------------------------ Types ------------------------------
 
@@ -22,7 +25,7 @@ use super::utils::{id, Span, Spanned};
 // One for the lexing stage, and one for the parsing stage.
 // This is for the lexing stage.
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Token {
     Comment(String),
     // String, may include escaped characters
@@ -34,7 +37,7 @@ pub enum Token {
 }
 
 // Helper trait to make it easier to create tokens
-trait Tokenable {
+pub(crate) trait Tokenable {
     fn word(&self) -> Token;
     fn delimiter(&self) -> Token;
     fn string_tok(&self, delim: &str) -> Token;
@@ -88,9 +91,9 @@ pub const SINGLE_CHAR_DELIMITERS: &'static [char] = &[
 
 pub const MULTI_CHAR_DELIMS: &'static [&'static str] = &["!=", "=~", "!~", "|="];
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct Delimited<T> {
-    s: String,
+    pub s: String,
     // a type to implement a trait which maps to the valid variants
     // TBD if this is necessary
     pub(crate) valid: PhantomData<T>,
@@ -110,6 +113,49 @@ pub type Nothing = PhantomData<()>;
 pub struct Stubby {}
 
 pub type Result<'a, E> = IResult<Span<'a>, Spanned<'a, Token>, E>;
+
+pub(crate) struct TokenStream<'a>(Vec<Spanned<'a, Token>>);
+impl<'a> InputIter for TokenStream<'a> {
+    type Item = Spanned<'a, Token>;
+
+    type Iter = Enumerate<std::vec::IntoIter<Self::Item>>;
+
+    type IterElem = std::vec::IntoIter<Self::Item>;
+
+    fn iter_indices(&self) -> Self::Iter {
+        self.0.clone().into_iter().enumerate()
+    }
+
+    fn iter_elements(&self) -> Self::IterElem {
+        self.0.clone().into_iter()
+    }
+
+    fn position<P>(&self, predicate: P) -> Option<usize>
+    where
+        P: Fn(Self::Item) -> bool,
+    {
+        for (i, x) in self.iter_indices() {
+            if predicate(x) {
+                return Some(i);
+            }
+        }
+        None
+    }
+
+    fn slice_index(&self, count: usize) -> std::result::Result<usize, nom::Needed> {
+        let mut cnt = 0;
+        for (index, _) in self.iter_indices() {
+            if cnt == count {
+                return Ok(index);
+            }
+            cnt += 1;
+        }
+        if cnt == count {
+            return Ok(self.0.len());
+        }
+        Err(Needed::Unknown)
+    }
+}
 
 // ------------------------------ Logic ------------------------------
 fn lex<'a, E: ParseError<Span<'a>>>(
@@ -197,21 +243,6 @@ fn comment<'a, E: ParseError<Span<'a>>>(input: Span<'a>) -> Result<E> {
         ),
     )
     .parse(input)
-}
-
-// Run a parser, extracting the position and mapping the result
-fn spanned<I, O, O2, E, P, F>(mut f: F, mut p: P) -> impl FnMut(I) -> IResult<I, (I, O2), E>
-where
-    P: Parser<I, O, E>,
-    E: nom::error::ParseError<I>,
-    I: nom::InputTake + nom::InputIter,
-    F: FnMut(O) -> O2,
-{
-    move |s| {
-        let (s, pos) = position(s)?;
-        let (s, x) = p.parse(s)?;
-        Ok((s, (pos, f(x))))
-    }
 }
 
 /// A combinator that takes a parser `inner` and produces a parser that also consumes both leading and

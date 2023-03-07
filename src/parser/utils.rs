@@ -1,7 +1,8 @@
 use core::fmt;
 use std::fmt::Display;
 
-use nom_locate::LocatedSpan;
+use nom::{IResult, Parser};
+use nom_locate::{position, LocatedSpan};
 use tower_lsp::lsp_types::CompletionItem;
 
 pub type Span<'a> = LocatedSpan<&'a str>;
@@ -29,4 +30,19 @@ impl<E> SuggestiveError<E> {
 
 pub fn id<A>(x: A) -> A {
     x
+}
+
+// Run a parser, extracting the position and mapping the result
+pub fn spanned<I, O, O2, E, P, F>(mut f: F, mut p: P) -> impl FnMut(I) -> IResult<I, (I, O2), E>
+where
+    P: Parser<I, O, E>,
+    E: nom::error::ParseError<I>,
+    I: nom::InputTake + nom::InputIter,
+    F: FnMut(O) -> O2,
+{
+    move |s| {
+        let (s, pos) = position(s)?;
+        let (s, x) = p.parse(s)?;
+        Ok((s, (pos, f(x))))
+    }
 }
