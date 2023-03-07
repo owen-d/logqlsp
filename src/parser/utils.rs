@@ -1,9 +1,11 @@
 use core::fmt;
 use std::fmt::Display;
 
-use nom::{IResult, Parser};
+use nom::{error::ParseError, IResult, Parser};
 use nom_locate::{position, LocatedSpan};
 use tower_lsp::lsp_types::CompletionItem;
+
+use super::lexer::TokenStream;
 
 pub type Span<'a> = LocatedSpan<&'a str>;
 //  Alias for colocating a span with some <T>
@@ -26,10 +28,6 @@ impl<E> SuggestiveError<E> {
     pub fn new(err: E, completions: Option<Vec<CompletionItem>>) -> Self {
         Self { err, completions }
     }
-}
-
-pub fn id<A>(x: A) -> A {
-    x
 }
 
 // Run a parser, extracting the position and mapping the result

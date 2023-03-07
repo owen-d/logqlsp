@@ -13,17 +13,28 @@ use super::{
 };
 
 #[derive(Debug, Clone, PartialEq)]
-enum Filter {
+pub enum Filter {
     Eq,   // =
     Neq,  // !=
     Req,  // =~
     NReq, // !~
 }
 
+#[cfg(test)]
+#[test]
+fn test_parse_filter() {
+    let input = Span::new("=~");
+    let (_, toks) = super::lexer::lex::<VerboseError<Span>>(input).unwrap();
+
+    let ts = TokenStream::new(&toks);
+
+    let (_, (_, f)) = parse_filter::<VerboseError<_>>(ts).unwrap();
+    assert_eq!(Filter::Req, f)
+}
+
 pub fn parse_filter<'a, E>(i: TokenStream<'a>) -> IResult<TokenStream<'a>, Spanned<'a, Filter>, E>
 where
     E: ParseError<TokenStream<'a>> + ContextError<TokenStream<'a>>,
-    nom::Err<E>: nom::error::ParseError<TokenStream<'a>>,
 {
     let mappings = (
         parse_filter_variant("=".delimiter(), Filter::Eq),
@@ -41,7 +52,6 @@ fn parse_filter_variant<'a, E>(
 ) -> impl Fn(TokenStream<'a>) -> IResult<TokenStream<'a>, Spanned<'a, Filter>, E>
 where
     E: ParseError<TokenStream<'a>>,
-    nom::Err<E>: nom::error::ParseError<TokenStream<'a>>,
 {
     move |i| {
         let (s, (sp, _)) = just(from.clone())(i)?;

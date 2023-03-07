@@ -17,7 +17,7 @@ use nom::{
 use nom::{Compare, InputLength, InputTake, InputTakeAtPosition, Needed, Parser};
 use nom_locate::position;
 
-use super::utils::{id, spanned, Span, Spanned};
+use super::utils::{spanned, Span, Spanned};
 
 // ------------------------------ Types ------------------------------
 
@@ -121,11 +121,16 @@ pub struct Stubby {}
 
 pub type Result<'a, E> = IResult<Span<'a>, Spanned<'a, Token>, E>;
 
-#[derive(Clone)]
-pub(crate) struct TokenStream<'a>(&'a [Spanned<'a, Token>]);
+#[derive(Clone, Debug)]
+pub struct TokenStream<'a>(&'a [Spanned<'a, Token>]);
+impl<'a> TokenStream<'a> {
+    pub fn new(toks: &'a [Spanned<'a, Token>]) -> Self {
+        Self(toks)
+    }
+}
 
 // helper trait for dequeing first token
-pub(crate) trait Head {
+pub trait Head {
     type Item;
     fn head(&self) -> Option<Self::Item>;
 }
@@ -134,7 +139,7 @@ impl<'a> Head for TokenStream<'a> {
     type Item = Spanned<'a, Token>;
 
     fn head(&self) -> Option<Self::Item> {
-        self.0.get(0).map(|x| *x)
+        self.0.get(0).map(|x| x.clone())
     }
 }
 
@@ -244,7 +249,7 @@ impl<'a> Iterator for TokenIndices<'a> {
 }
 
 // ------------------------------ Logic ------------------------------
-fn lex<'a, E: ParseError<Span<'a>>>(
+pub(crate) fn lex<'a, E: ParseError<Span<'a>>>(
     input: Span<'a>,
 ) -> IResult<Span<'a>, Vec<Spanned<'a, Token>>, E> {
     // todo(owen-d): implement escaped strings
