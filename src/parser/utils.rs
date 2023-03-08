@@ -9,10 +9,16 @@ use super::lexer::TokenStream;
 
 pub type Span<'a> = LocatedSpan<&'a str>;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Spanned<'a, T> {
     pub span: Span<'a>,
     pub value: T,
+}
+
+impl<'a, T> Spanned<'a, T> {
+    pub fn new(span: Span<'a>, value: T) -> Self {
+        Self { span, value }
+    }
 }
 
 impl<'a, T> From<(Span<'a>, T)> for Spanned<'a, T> {
