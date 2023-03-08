@@ -14,7 +14,7 @@ use super::{
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Filter {
-    Eq,   // =
+    Eq,   // |=
     Neq,  // !=
     Req,  // =~
     NReq, // !~
@@ -25,26 +25,13 @@ where
     E: ParseError<TokenStream<'a>> + ContextError<TokenStream<'a>>,
 {
     let mappings = (
-        parse_filter_variant("=".delimiter(), Filter::Eq),
-        parse_filter_variant("!=".delimiter(), Filter::Neq),
-        parse_filter_variant("=~".delimiter(), Filter::Req),
-        parse_filter_variant("!~".delimiter(), Filter::NReq),
+        map(just("|=".delimiter()), |x| x.map_v(|_| Filter::Eq)),
+        map(just("!=".delimiter()), |x| x.map_v(|_| Filter::Neq)),
+        map(just("=~".delimiter()), |x| x.map_v(|_| Filter::Req)),
+        map(just("!~".delimiter()), |x| x.map_v(|_| Filter::NReq)),
     );
 
     context("filter", alt(mappings))(i)
-}
-
-fn parse_filter_variant<'a, E>(
-    from: Token,
-    to: Filter,
-) -> impl Fn(TokenStream<'a>) -> IResult<TokenStream<'a>, Spanned<'a, Filter>, E>
-where
-    E: ParseError<TokenStream<'a>>,
-{
-    move |i| {
-        let (s, x) = just(from.clone())(i)?;
-        Ok((s, x.map_v(|_| to.clone())))
-    }
 }
 
 // token, stream, spannedtoken, e
@@ -67,14 +54,38 @@ where
     }
 }
 
+// MatcherType is the type of matcher. It can be equality, regex, etc.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum MatcherType {
+    Eq,  // =
+    Neq, // !=
+    Re,  // =~
+    Nre, // !~
+}
+
+pub fn parse_matcher_type<'a, E>(
+    input: TokenStream<'a>,
+) -> IResult<TokenStream<'a>, Spanned<'a, MatcherType>, E>
+where
+    E: ParseError<TokenStream<'a>> + ContextError<TokenStream<'a>>,
+{
+    let mappings = (
+        map(just("=".delimiter()), |x| x.map_v(|_| MatcherType::Eq)),
+        map(just("!=".delimiter()), |x| x.map_v(|_| MatcherType::Neq)),
+        map(just("=~".delimiter()), |x| x.map_v(|_| MatcherType::Re)),
+        map(just("!~".delimiter()), |x| x.map_v(|_| MatcherType::Nre)),
+    );
+    context("matcher_type", alt(mappings))(input)
+}
+
 #[cfg(test)]
 #[test]
 fn test_parse_filter() {
-    let input = Span::new("=~");
+    let input = Span::new("|=");
     let (_, toks) = super::lexer::lex::<VerboseError<Span>>(input).unwrap();
 
     let ts = TokenStream::new(&toks);
 
     let (_, f) = parse_filter::<VerboseError<_>>(ts).unwrap();
-    assert_eq!(Filter::Req, *f)
+    assert_eq!(Filter::Eq, *f)
 }
