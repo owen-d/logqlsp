@@ -31,7 +31,7 @@ pub enum Token {
     // String, may include escaped characters
     String(String),
     // Sequence of chars
-    Word(String),
+    Identifier(String),
     // (, ), [, ], {, }, ", `, ,, |, =, ~, !, *, /, +, -, #, \n
     Delimiter(Delimited<String>),
 }
@@ -45,15 +45,15 @@ impl InputLength for Token {
 
 // Helper trait to make it easier to create tokens
 pub(crate) trait Tokenable {
-    fn word(&self) -> Token;
+    fn identifier(&self) -> Token;
     fn delimiter(&self) -> Token;
     fn string_tok(&self, delim: &str) -> Token;
     fn comment(&self) -> Token;
 }
 
 impl Tokenable for &str {
-    fn word(&self) -> Token {
-        Token::Word(self.to_string())
+    fn identifier(&self) -> Token {
+        Token::Identifier(self.to_string())
     }
 
     fn delimiter(&self) -> Token {
@@ -72,8 +72,8 @@ impl Tokenable for &str {
 }
 
 impl Tokenable for char {
-    fn word(&self) -> Token {
-        Token::Word(self.to_string())
+    fn identifier(&self) -> Token {
+        Token::Identifier(self.to_string())
     }
 
     fn delimiter(&self) -> Token {
@@ -322,7 +322,7 @@ fn raw_string<'a, E: ParseError<Span<'a>>>(input: Span<'a>) -> Result<E> {
 
 fn word<'a, E: ParseError<Span<'a>>>(input: Span<'a>) -> Result<E> {
     let is_valid = |c: char| c.is_alphanumeric() || c == '_';
-    spanned(|x: Span| x.word(), take_while(is_valid)).parse(input)
+    spanned(|x: Span| x.identifier(), take_while(is_valid)).parse(input)
 }
 
 fn comment<'a, E: ParseError<Span<'a>>>(input: Span<'a>) -> Result<E> {
@@ -379,11 +379,11 @@ fn test_input() {
     assert_eq!("", *s.fragment());
     let expected_toks: Vec<Token> = vec![
         "{".delimiter(),
-        "foo".word(),
+        "foo".identifier(),
         "=".delimiter(),
         "bar".string_tok("\""),
         ",".delimiter(),
-        "bazz".word(),
+        "bazz".identifier(),
         "!=".delimiter(),
         "buzz".string_tok("\""),
         "}".delimiter(),
