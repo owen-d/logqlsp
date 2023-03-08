@@ -146,7 +146,7 @@ impl<'a> Head for TokenStream<'a> {
 impl<'a> Compare<Token> for TokenStream<'a> {
     fn compare(&self, t: Token) -> nom::CompareResult {
         match self.0.get(0) {
-            Some((_, x)) if *x == t => nom::CompareResult::Ok,
+            Some(sp) if sp.value == t => nom::CompareResult::Ok,
             Some(_) => nom::CompareResult::Error,
             None => nom::CompareResult::Incomplete,
         }
@@ -355,7 +355,7 @@ fn test_string() {
     let (s, tok) = string::<VerboseError<Span>>(input).unwrap();
     assert_eq!("", *s.fragment());
     let expected_tok = Token::String("\"fo\\\"o\"".to_string());
-    assert_eq!(expected_tok, tok.1)
+    assert_eq!(expected_tok, *tok)
 }
 
 #[cfg(test)]
@@ -365,7 +365,7 @@ fn test_raw_string() {
     let (s, tok) = string::<VerboseError<Span>>(input).unwrap();
     assert_eq!("", *s.fragment());
     let expected_tok: Token = Token::String(r#"`foo\`"#.to_string());
-    assert_eq!(expected_tok, tok.1)
+    assert_eq!(expected_tok, *tok)
 }
 
 #[cfg(test)]
@@ -398,6 +398,8 @@ fn test_input() {
     ];
     assert_eq!(
         expected_toks,
-        toks.into_iter().map(|(_, x)| x).collect::<Vec<Token>>()
+        toks.into_iter()
+            .map(|x: Spanned<Token>| x.value)
+            .collect::<Vec<Token>>()
     )
 }

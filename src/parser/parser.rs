@@ -20,18 +20,6 @@ pub enum Filter {
     NReq, // !~
 }
 
-#[cfg(test)]
-#[test]
-fn test_parse_filter() {
-    let input = Span::new("=~");
-    let (_, toks) = super::lexer::lex::<VerboseError<Span>>(input).unwrap();
-
-    let ts = TokenStream::new(&toks);
-
-    let (_, (_, f)) = parse_filter::<VerboseError<_>>(ts).unwrap();
-    assert_eq!(Filter::Req, f)
-}
-
 pub fn parse_filter<'a, E>(i: TokenStream<'a>) -> IResult<TokenStream<'a>, Spanned<'a, Filter>, E>
 where
     E: ParseError<TokenStream<'a>> + ContextError<TokenStream<'a>>,
@@ -54,8 +42,8 @@ where
     E: ParseError<TokenStream<'a>>,
 {
     move |i| {
-        let (s, (sp, _)) = just(from.clone())(i)?;
-        Ok((s, (sp, to.clone())))
+        let (s, x) = just(from.clone())(i)?;
+        Ok((s, x.map_v(|_| to.clone())))
     }
 }
 
@@ -67,14 +55,26 @@ where
     Error: ParseError<Input>,
 {
     move |i: Input| {
-        if let Some((sp, found)) = i.head() {
-            if found == tag {
+        if let Some(found) = i.head() {
+            if found.value == tag {
                 let tag_len = tag.input_len();
                 let (rest, _) = i.take_split(tag_len);
-                return Ok((rest, (sp, found)));
+                return Ok((rest, found));
             }
         };
         let e: ErrorKind = ErrorKind::Tag;
         Err(nom::Err::Error(Error::from_error_kind(i, e)))
     }
+}
+
+#[cfg(test)]
+#[test]
+fn test_parse_filter() {
+    let input = Span::new("=~");
+    let (_, toks) = super::lexer::lex::<VerboseError<Span>>(input).unwrap();
+
+    let ts = TokenStream::new(&toks);
+
+    let (_, f) = parse_filter::<VerboseError<_>>(ts).unwrap();
+    assert_eq!(Filter::Req, *f)
 }
