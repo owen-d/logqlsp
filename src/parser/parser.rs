@@ -1,11 +1,13 @@
 use nom::{
     branch::alt,
     bytes::complete::tag,
-    combinator::map,
+    combinator::{map, peek},
     error::{context, make_error, ContextError, Error, ErrorKind, ParseError, VerboseError},
-    sequence::{separated_pair, Tuple},
-    Compare, CompareResult, IResult, InputLength, InputTake,
+    multi::separated_list0,
+    sequence::{delimited, separated_pair, Tuple},
+    Compare, CompareResult, IResult, InputLength, InputTake, Parser,
 };
+use nom_locate::position;
 
 use super::{
     lexer::{Delimited, Head, Token, TokenStream, Tokenable},
@@ -110,6 +112,33 @@ where
     ))
 }
 
+// Selector is a set of label matchers.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Selector<'a> {
+    pub labels: Vec<Spanned<'a, LabelMatcher<'a>>>,
+}
+
+pub fn parse_selector<'a, E>(
+    input: TokenStream<'a>,
+) -> IResult<TokenStream<'a>, Spanned<'a, Selector>, E>
+where
+    E: ParseError<TokenStream<'a>> + ContextError<TokenStream<'a>>,
+{
+    context("selector", |input| {
+        // extract the span for the beginning of the selector
+        let (input, sp) = peek(just("{".delimiter())).parse(input)?;
+
+        delimited(
+            just("{".delimiter()),
+            separated_list0(just(",".delimiter()), parse_label_matcher),
+            just("}".delimiter()),
+        )
+        .parse(input)
+        .map(|(rest, labels)| (rest, sp.map_v(|_| Selector { labels })))
+    })
+    .parse(input)
+}
+
 // macro to generate parsers that match a specific token variant
 #[macro_export]
 macro_rules! impl_token_type_parser {
@@ -166,4 +195,23 @@ fn test_parse_label_matcher() {
     assert_eq!("foo".to_string(), *m.name);
     assert_eq!(r#""bar""#.to_string(), *m.value);
     assert_eq!(MatcherType::Eq, *m.matcher_type);
+}
+
+#[cfg(test)]
+#[test]
+fn test_parse_selector() {
+    let input = Span::new(r#"{foo="bar", bazz!~"buzz"}"#);
+    let (_, toks) = super::lexer::lex::<VerboseError<Span>>(input).unwrap();
+
+    let ts = TokenStream::new(&toks);
+
+    let (_, f) = parse_selector::<VerboseError<_>>(ts).unwrap();
+    let s = f.value;
+    assert_eq!(2, s.labels.len());
+    assert_eq!("foo".to_string(), *s.labels[0].value.name);
+    assert_eq!(r#""bar""#.to_string(), *s.labels[0].value.value);
+    assert_eq!(MatcherType::Eq, *s.labels[0].value.matcher_type);
+    assert_eq!("bazz".to_string(), *s.labels[1].value.name);
+    assert_eq!(r#""buzz""#.to_string(), *s.labels[1].value.value);
+    assert_eq!(MatcherType::Nre, *s.labels[1].value.matcher_type);
 }

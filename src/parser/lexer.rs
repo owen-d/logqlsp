@@ -216,6 +216,12 @@ impl InputTake for TokenStream<'_> {
     }
 }
 
+impl InputLength for TokenStream<'_> {
+    fn input_len(&self) -> usize {
+        self.0.len()
+    }
+}
+
 pub struct TokenIter<'a> {
     iter: slice::Iter<'a, Spanned<'a, Token>>,
 }
