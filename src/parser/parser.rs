@@ -1,18 +1,39 @@
 use nom::{
     branch::alt,
     bytes::complete::tag,
-    combinator::{map, peek},
+    combinator::{map, opt, peek},
     error::{context, make_error, ContextError, Error, ErrorKind, ParseError, VerboseError},
     multi::separated_list0,
-    sequence::{delimited, separated_pair, Tuple},
+    sequence::{delimited, separated_pair, terminated, Tuple},
     Compare, CompareResult, IResult, InputLength, InputTake, Parser,
 };
 use nom_locate::position;
 
 use super::{
     lexer::{Delimited, Head, Token, TokenStream, Tokenable},
+    pipeline::{parse_pipeline_expr, PipelineExpr},
     utils::{spanned, Span, Spanned},
 };
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct LogExpr<'a> {
+    pub selector: Spanned<'a, Selector<'a>>,
+    pipeline: Option<Spanned<'a, PipelineExpr<'a>>>,
+}
+
+pub fn parse_log_expr<'a, E>(
+    input: TokenStream<'a>,
+) -> IResult<TokenStream<'a>, Spanned<'a, LogExpr<'a>>, E>
+where
+    E: ParseError<TokenStream<'a>> + ContextError<TokenStream<'a>>,
+{
+    let (input, selector) = parse_selector(input)?;
+    let (input, pipeline) = opt(parse_pipeline_expr)(input)?;
+    Ok((
+        input,
+        Spanned::from((selector.span.clone(), LogExpr { selector, pipeline })),
+    ))
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Filter {
