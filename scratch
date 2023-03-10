@@ -13,7 +13,3 @@ Can impl ParseError trait if need more control: https://github.com/rust-bakery/n
 | while building selector
 | while building logSelectorExpr
 | while building expr
-
-# Parsers to make
-
-|=, etc = filter
