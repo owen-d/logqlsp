@@ -1,5 +1,6 @@
 use std::iter::Enumerate;
 use std::marker::PhantomData;
+use std::ops::Deref;
 use std::slice::{self, Iter};
 use std::vec;
 
@@ -129,6 +130,13 @@ impl<'a> TokenStream<'a> {
     }
 }
 
+impl<'a> Deref for TokenStream<'a> {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        self.0.get(0).map_or("", |x| x.span.fragment())
+    }
+}
 // helper trait for dequeing first token
 pub trait Head {
     type Item;
