@@ -72,7 +72,7 @@ impl LanguageServer for Backend {
                                     token_types: LEGEND_TYPE.clone().into(),
                                     token_modifiers: vec![],
                                 },
-                                range: Some(false),
+                                range: Some(true),
                                 full: Some(SemanticTokensFullOptions::Bool(true)),
                             },
                             static_registration_options: StaticRegistrationOptions::default(),
@@ -80,7 +80,6 @@ impl LanguageServer for Backend {
                     ),
                 ),
                 references_provider: Some(OneOf::Left(false)),
-                // definition: Some(GotoCapability::default()),
                 definition_provider: Some(OneOf::Left(false)),
                 rename_provider: Some(OneOf::Left(false)),
                 ..ServerCapabilities::default()
@@ -158,7 +157,8 @@ impl LanguageServer for Backend {
     }
 
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
-        todo!();
+        let _ = params;
+        Ok(None)
     }
 
     async fn semantic_tokens_full(
@@ -167,7 +167,7 @@ impl LanguageServer for Backend {
     ) -> Result<Option<SemanticTokensResult>> {
         let uri = params.text_document.uri.to_string();
         self.client
-            .log_message(MessageType::LOG, "semantic_token_full")
+            .log_message(MessageType::INFO, "semantic_token_full")
             .await;
 
         match self.document_map.get(&uri) {
@@ -175,7 +175,40 @@ impl LanguageServer for Backend {
                 Some(toks) => {
                     let mut tokens = Vec::new();
                     toks.semantic_tokens(&mut tokens);
+                    self.client
+                        .log_message(MessageType::INFO, format!("{:#?}", tokens))
+                        .await;
                     return Ok(Some(SemanticTokensResult::Tokens(
+                        lsp_types::SemanticTokens {
+                            result_id: None,
+                            data: tokens,
+                        },
+                    )));
+                }
+                None => Ok(None),
+            },
+            None => Ok(None),
+        }
+    }
+
+    async fn semantic_tokens_range(
+        &self,
+        params: SemanticTokensRangeParams,
+    ) -> Result<Option<SemanticTokensRangeResult>> {
+        let uri = params.text_document.uri.to_string();
+        self.client
+            .log_message(MessageType::INFO, "semantic_token_range")
+            .await;
+
+        match self.document_map.get(&uri) {
+            Some(f) => match &f.tokens {
+                Some(toks) => {
+                    let mut tokens = Vec::new();
+                    toks.semantic_tokens(&mut tokens);
+                    self.client
+                        .log_message(MessageType::INFO, format!("{:#?}", tokens))
+                        .await;
+                    return Ok(Some(SemanticTokensRangeResult::Tokens(
                         lsp_types::SemanticTokens {
                             result_id: None,
                             data: tokens,
