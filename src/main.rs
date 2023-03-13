@@ -72,7 +72,7 @@ impl LanguageServer for Backend {
                                     token_types: LEGEND_TYPE.clone().into(),
                                     token_modifiers: vec![],
                                 },
-                                range: Some(true),
+                                range: Some(false),
                                 full: Some(SemanticTokensFullOptions::Bool(true)),
                             },
                             static_registration_options: StaticRegistrationOptions::default(),
@@ -157,6 +157,10 @@ impl LanguageServer for Backend {
             .await;
     }
 
+    async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
+        todo!();
+    }
+
     async fn semantic_tokens_full(
         &self,
         params: SemanticTokensParams,
@@ -166,21 +170,22 @@ impl LanguageServer for Backend {
             .log_message(MessageType::LOG, "semantic_token_full")
             .await;
 
-        if let Some(toks) = self.document_map.get(&uri).and_then(|f| f.tokens) {
-            let tokens = Vec::new();
-            toks.semantic_tokens(&mut tokens);
-            return Ok(Some(SemanticTokensResult::Tokens(
-                lsp_types::SemanticTokens {
-                    result_id: None,
-                    data: tokens,
-                },
-            )));
+        match self.document_map.get(&uri) {
+            Some(f) => match &f.tokens {
+                Some(toks) => {
+                    let mut tokens = Vec::new();
+                    toks.semantic_tokens(&mut tokens);
+                    return Ok(Some(SemanticTokensResult::Tokens(
+                        lsp_types::SemanticTokens {
+                            result_id: None,
+                            data: tokens,
+                        },
+                    )));
+                }
+                None => Ok(None),
+            },
+            None => Ok(None),
         }
-        Ok(None)
-    }
-
-    async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
-        todo!();
     }
 }
 
@@ -235,17 +240,8 @@ async fn main() {
 
     let (service, socket) = LspService::build(|client| Backend {
         client,
-        ast_map: DashMap::new(),
         document_map: DashMap::new(),
-        semantic_token_map: DashMap::new(),
     })
     .finish();
     Server::new(stdin, stdout, socket).serve(service).await;
-}
-
-fn offset_to_position(offset: usize, rope: &Rope) -> Option<Position> {
-    let line = rope.try_char_to_line(offset).ok()?;
-    let first_char = rope.try_line_to_char(line).ok()?;
-    let column = offset - first_char;
-    Some(Position::new(line as u32, column as u32))
 }
