@@ -201,10 +201,16 @@ impl Backend {
                 None
             }
             Err(e) => {
+                // hack via https://github.com/fflorent/nom_locate/issues/36#issuecomment-1013469728
+                let errors = e
+                    .errors
+                    .iter()
+                    .map(|(input, error)| (*input.fragment(), error.clone()))
+                    .collect();
                 self.client
                     .log_message(MessageType::INFO, format!("{:?}", e))
                     .await;
-                Some(convert_error(input, e))
+                Some(convert_error(*input.fragment(), VerboseError { errors }))
             }
         };
 
