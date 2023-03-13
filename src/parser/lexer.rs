@@ -19,7 +19,7 @@ use nom::{Compare, InputLength, InputTake, InputTakeAtPosition, Needed, Parser};
 use nom_locate::position;
 use tower_lsp::lsp_types::SemanticTokenType;
 
-use super::utils::{spanned, Span, Spanned};
+use super::utils::{spanned, RefSpanned, Span, Spanned};
 
 // ------------------------------ Types ------------------------------
 
@@ -132,12 +132,12 @@ pub type Nothing = PhantomData<()>;
 // such as default Resolvers
 pub struct Stubby {}
 
-pub type Result<'a, E> = IResult<Span<'a>, Spanned<'a, Token>, E>;
+pub type Result<'a, E> = IResult<Span<'a>, RefSpanned<'a, Token>, E>;
 
 #[derive(Clone, Debug)]
-pub struct TokenStream<'a>(&'a [Spanned<'a, Token>]);
+pub struct TokenStream<'a>(&'a [RefSpanned<'a, Token>]);
 impl<'a> TokenStream<'a> {
-    pub fn new(toks: &'a [Spanned<'a, Token>]) -> Self {
+    pub fn new(toks: &'a [RefSpanned<'a, Token>]) -> Self {
         Self(toks)
     }
 }
@@ -156,7 +156,7 @@ pub trait Head {
 }
 
 impl<'a> Head for TokenStream<'a> {
-    type Item = Spanned<'a, Token>;
+    type Item = RefSpanned<'a, Token>;
 
     fn head(&self) -> Option<Self::Item> {
         self.0.get(0).map(|x| x.clone())
@@ -178,7 +178,7 @@ impl<'a> Compare<Token> for TokenStream<'a> {
 }
 
 impl<'a> InputIter for TokenStream<'a> {
-    type Item = Spanned<'a, Token>;
+    type Item = RefSpanned<'a, Token>;
 
     type Iter = TokenIndices<'a>;
 
@@ -243,11 +243,11 @@ impl InputLength for TokenStream<'_> {
 }
 
 pub struct TokenIter<'a> {
-    iter: slice::Iter<'a, Spanned<'a, Token>>,
+    iter: slice::Iter<'a, RefSpanned<'a, Token>>,
 }
 
 impl<'a> Iterator for TokenIter<'a> {
-    type Item = Spanned<'a, Token>;
+    type Item = RefSpanned<'a, Token>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.iter.next().map(|x| x.clone())
@@ -260,7 +260,7 @@ pub struct TokenIndices<'a> {
 }
 
 impl<'a> Iterator for TokenIndices<'a> {
-    type Item = (usize, Spanned<'a, Token>);
+    type Item = (usize, RefSpanned<'a, Token>);
 
     fn next(&mut self) -> Option<Self::Item> {
         match self.iter.next() {
@@ -275,9 +275,9 @@ impl<'a> Iterator for TokenIndices<'a> {
 }
 
 // ------------------------------ Logic ------------------------------
-pub(crate) fn lex<'a, E: ParseError<Span<'a>>>(
+pub fn lex<'a, E: ParseError<Span<'a>>>(
     input: Span<'a>,
-) -> IResult<Span<'a>, Vec<Spanned<'a, Token>>, E> {
+) -> IResult<Span<'a>, Vec<RefSpanned<'a, Token>>, E> {
     // todo(owen-d): implement escaped strings
 
     let multi_char_delims = |s| {
@@ -301,7 +301,7 @@ pub(crate) fn lex<'a, E: ParseError<Span<'a>>>(
     )));
 
     let mut tokens =
-        many_till(token, eof).map(|(toks, _)| toks.into_iter().collect::<Vec<Spanned<Token>>>());
+        many_till(token, eof).map(|(toks, _)| toks.into_iter().collect::<Vec<RefSpanned<Token>>>());
 
     tokens.parse(input)
 }
@@ -377,7 +377,7 @@ where
 #[cfg(test)]
 #[test]
 fn test_string() {
-    let input = Span::new_extra(r#""fo\"o""#, None);
+    let input = Span::new(r#""fo\"o""#);
     let (s, tok) = string::<VerboseError<Span>>(input).unwrap();
     assert_eq!("", *s.fragment());
     let expected_tok = Token::String("\"fo\\\"o\"".to_string());
@@ -387,7 +387,7 @@ fn test_string() {
 #[cfg(test)]
 #[test]
 fn test_raw_string() {
-    let input = Span::new_extra(r#"`foo\`"#, None);
+    let input = Span::new(r#"`foo\`"#);
     let (s, tok) = string::<VerboseError<Span>>(input).unwrap();
     assert_eq!("", *s.fragment());
     let expected_tok: Token = Token::String(r#"`foo\`"#.to_string());
@@ -397,10 +397,9 @@ fn test_raw_string() {
 #[cfg(test)]
 #[test]
 fn test_input() {
-    let input = Span::new_extra(
+    let input = Span::new(
         r#"{foo="bar", bazz!="buzz"} |= "bonk" |= `\n` |= "sno\"t " # foo|bar"
 #final"#,
-        None,
     );
     let (s, toks) = lex::<VerboseError<Span>>(input).unwrap();
     assert_eq!("", *s.fragment());
@@ -431,12 +430,12 @@ fn test_input() {
     assert_eq!(
         // expected_toks
         //     .into_iter()
-        //     .map(|x| (Span::new_extra("", None), x).into())
+        //     .map(|x| (Span::new(""), x).into())
         //     .collect::<Vec<Spanned<Token>>>(),
         // toks,
         expected_toks,
         toks.into_iter()
-            .map(|x: Spanned<Token>| x.value)
+            .map(|x: RefSpanned<Token>| x.value)
             .collect::<Vec<Token>>()
     )
 }

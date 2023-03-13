@@ -1,20 +1,30 @@
 use std::sync::Arc;
 
 use dashmap::DashMap;
+use logql_language_server::parser::lexer::{lex, Token, TokenStream};
 use logql_language_server::parser::parser::LogExpr;
+use logql_language_server::parser::utils::{Offset, Span, Spanned};
+use logql_language_server::semantic_tokens::{SemanticTokens, LEGEND_TYPE};
+use nom::error::{convert_error, VerboseError};
+use nom::Finish;
 use ropey::Rope;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tower_lsp::jsonrpc::Result;
-use tower_lsp::lsp_types::*;
+use tower_lsp::lsp_types::{self, *};
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 
 #[derive(Debug)]
 struct Backend {
     client: Client,
-    ast_map: DashMap<String, ()>,
-    document_map: DashMap<String, Rope>,
-    semantic_token_map: DashMap<String, ()>,
+    // stores text input
+    document_map: DashMap<String, File>,
+}
+
+#[derive(Debug)]
+struct File {
+    uri: String,
+    tokens: Option<Vec<Spanned<Offset, Token>>>,
 }
 
 #[tower_lsp::async_trait]
@@ -155,89 +165,16 @@ impl LanguageServer for Backend {
         self.client
             .log_message(MessageType::LOG, "semantic_token_full")
             .await;
-        let semantic_tokens = || -> Option<Vec<SemanticToken>> {
-            let mut im_complete_tokens = self.semantic_token_map.get_mut(&uri)?;
-            let rope = self.document_map.get(&uri)?;
-            let ast = self.ast_map.get(&uri)?;
-            let extends_tokens = semantic_token_from_ast(&ast);
-            im_complete_tokens.extend(extends_tokens);
-            im_complete_tokens.sort_by(|a, b| a.start.cmp(&b.start));
-            let mut pre_line = 0;
-            let mut pre_start = 0;
-            let semantic_tokens = im_complete_tokens
-                .iter()
-                .filter_map(|token| {
-                    let line = rope.try_byte_to_line(token.start as usize).ok()? as u32;
-                    let first = rope.try_line_to_char(line as usize).ok()? as u32;
-                    let start = rope.try_byte_to_char(token.start as usize).ok()? as u32 - first;
-                    let delta_line = line - pre_line;
-                    let delta_start = if delta_line == 0 {
-                        start - pre_start
-                    } else {
-                        start
-                    };
-                    let ret = Some(SemanticToken {
-                        delta_line,
-                        delta_start,
-                        length: token.length as u32,
-                        token_type: token.token_type as u32,
-                        token_modifiers_bitset: 0,
-                    });
-                    pre_line = line;
-                    pre_start = start;
-                    ret
-                })
-                .collect::<Vec<_>>();
-            Some(semantic_tokens)
-        }();
-        if let Some(semantic_token) = semantic_tokens {
-            return Ok(Some(SemanticTokensResult::Tokens(SemanticTokens {
-                result_id: None,
-                data: semantic_token,
-            })));
-        }
-        Ok(None)
-    }
 
-    async fn semantic_tokens_range(
-        &self,
-        params: SemanticTokensRangeParams,
-    ) -> Result<Option<SemanticTokensRangeResult>> {
-        let uri = params.text_document.uri.to_string();
-        let semantic_tokens = || -> Option<Vec<SemanticToken>> {
-            let im_complete_tokens = self.semantic_token_map.get(&uri)?;
-            let rope = self.document_map.get(&uri)?;
-            let mut pre_line = 0;
-            let mut pre_start = 0;
-            let semantic_tokens = im_complete_tokens
-                .iter()
-                .filter_map(|token| {
-                    let line = rope.try_byte_to_line(token.start as usize).ok()? as u32;
-                    let first = rope.try_line_to_char(line as usize).ok()? as u32;
-                    let start = rope.try_byte_to_char(token.start as usize).ok()? as u32 - first;
-                    let ret = Some(SemanticToken {
-                        delta_line: line - pre_line,
-                        delta_start: if start >= pre_start {
-                            start - pre_start
-                        } else {
-                            start
-                        },
-                        length: token.length as u32,
-                        token_type: token.token_type as u32,
-                        token_modifiers_bitset: 0,
-                    });
-                    pre_line = line;
-                    pre_start = start;
-                    ret
-                })
-                .collect::<Vec<_>>();
-            Some(semantic_tokens)
-        }();
-        if let Some(semantic_token) = semantic_tokens {
-            return Ok(Some(SemanticTokensRangeResult::Tokens(SemanticTokens {
-                result_id: None,
-                data: semantic_token,
-            })));
+        if let Some(toks) = self.document_map.get(&uri).and_then(|f| f.tokens) {
+            let tokens = Vec::new();
+            toks.semantic_tokens(&mut tokens);
+            return Ok(Some(SemanticTokensResult::Tokens(
+                lsp_types::SemanticTokens {
+                    result_id: None,
+                    data: tokens,
+                },
+            )));
         }
         Ok(None)
     }
@@ -249,75 +186,31 @@ impl LanguageServer for Backend {
 
 impl Backend {
     async fn on_change(&self, params: TextDocumentItem) {
-        let rope = ropey::Rope::from_str(&params.text);
-        self.document_map
-            .insert(params.uri.to_string(), rope.clone());
-        let (ast, errors, semantic_tokens) = parse(&params.text);
-        self.client
-            .log_message(MessageType::INFO, format!("{:?}", errors))
-            .await;
-        let diagnostics = errors
-            .into_iter()
-            .filter_map(|item| {
-                let (message, span) = match item.reason() {
-                    chumsky::error::SimpleReason::Unclosed { span, delimiter } => {
-                        (format!("Unclosed delimiter {}", delimiter), span.clone())
-                    }
-                    chumsky::error::SimpleReason::Unexpected => (
-                        format!(
-                            "{}, expected {}",
-                            if item.found().is_some() {
-                                "Unexpected token in input"
-                            } else {
-                                "Unexpected end of input"
-                            },
-                            if item.expected().len() == 0 {
-                                "something else".to_string()
-                            } else {
-                                item.expected()
-                                    .map(|expected| match expected {
-                                        Some(expected) => expected.to_string(),
-                                        None => "end of input".to_string(),
-                                    })
-                                    .collect::<Vec<_>>()
-                                    .join(", ")
-                            }
-                        ),
-                        item.span(),
-                    ),
-                    chumsky::error::SimpleReason::Custom(msg) => (msg.to_string(), item.span()),
-                };
+        let input = Span::new(params.text.as_str());
+        let lexed = lex::<VerboseError<Span>>(input).finish();
+        let mut f = File {
+            uri: params.uri.to_string(),
+            tokens: None,
+        };
+        match lexed {
+            Ok((_, toks)) => {
+                // map spans into a non-referenced variant
+                let mapped = toks.into_iter().map(|x| x.map_sp(Offset::from)).collect();
+                f.tokens = Some(mapped);
 
-                let diagnostic = || -> Option<Diagnostic> {
-                    // let start_line = rope.try_char_to_line(span.start)?;
-                    // let first_char = rope.try_line_to_char(start_line)?;
-                    // let start_column = span.start - first_char;
-                    let start_position = offset_to_position(span.start, &rope)?;
-                    let end_position = offset_to_position(span.end, &rope)?;
-                    // let end_line = rope.try_char_to_line(span.end)?;
-                    // let first_char = rope.try_line_to_char(end_line)?;
-                    // let end_column = span.end - first_char;
-                    Some(Diagnostic::new_simple(
-                        Range::new(start_position, end_position),
-                        message,
-                    ))
-                }();
-                diagnostic
-            })
-            .collect::<Vec<_>>();
+                None
+            }
+            Err(e) => {
+                self.client
+                    .log_message(MessageType::INFO, format!("{:?}", e))
+                    .await;
+                Some(convert_error(input, e))
+            }
+        };
 
-        self.client
-            .publish_diagnostics(params.uri.clone(), diagnostics, Some(params.version))
-            .await;
+        self.document_map.insert(f.uri.clone(), f);
 
-        if let Some(ast) = ast {
-            self.ast_map.insert(params.uri.to_string(), ast);
-        }
-        self.client
-            .log_message(MessageType::INFO, &format!("{:?}", semantic_tokens))
-            .await;
-        self.semantic_token_map
-            .insert(params.uri.to_string(), semantic_tokens);
+        // TODO: add diagnostics
     }
 }
 

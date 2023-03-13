@@ -7,17 +7,17 @@ use nom::{
 use super::{
     lexer::TokenStream,
     parser::{parse_filter, parse_string, Filter},
-    utils::{Span, Spanned},
+    utils::{RefSpanned, Span, Spanned},
 };
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct PipelineExpr<'a> {
-    pub stages: Vec<Spanned<'a, PipelineStage<'a>>>,
+pub struct PipelineExpr<S> {
+    pub stages: Vec<Spanned<S, PipelineStage<S>>>,
 }
 
 pub fn parse_pipeline_expr<'a, E>(
     input: TokenStream<'a>,
-) -> IResult<TokenStream<'a>, Spanned<'a, PipelineExpr>, E>
+) -> IResult<TokenStream<'a>, RefSpanned<'a, PipelineExpr<Span<'a>>>, E>
 where
     E: ParseError<TokenStream<'a>> + ContextError<TokenStream<'a>>,
 {
@@ -33,14 +33,14 @@ where
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum PipelineStage<'a> {
-    LineFilter(Spanned<'a, LineFilter<'a>>),
+pub enum PipelineStage<S> {
+    LineFilter(Spanned<S, LineFilter<S>>),
     // Placeholder for | logfmt, etc
 }
 
 pub fn parse_pipeline_stage<'a, E>(
     input: TokenStream<'a>,
-) -> IResult<TokenStream<'a>, Spanned<'a, PipelineStage>, E>
+) -> IResult<TokenStream<'a>, RefSpanned<'a, PipelineStage<Span<'a>>>, E>
 where
     E: ParseError<TokenStream<'a>> + ContextError<TokenStream<'a>>,
 {
@@ -52,14 +52,14 @@ where
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct LineFilter<'a> {
-    pub filter: Spanned<'a, Filter>,
-    pub s: Spanned<'a, String>,
+pub struct LineFilter<S> {
+    pub filter: Spanned<S, Filter>,
+    pub s: Spanned<S, String>,
 }
 
 pub fn parse_line_filter<'a, E>(
     input: TokenStream<'a>,
-) -> IResult<TokenStream<'a>, Spanned<'a, LineFilter>, E>
+) -> IResult<TokenStream<'a>, RefSpanned<'a, LineFilter<Span<'a>>>, E>
 where
     E: ParseError<TokenStream<'a>> + ContextError<TokenStream<'a>>,
 {
@@ -71,7 +71,7 @@ where
 
 #[test]
 fn test_parse_pipeline_expr() {
-    let input = Span::new_extra(r#"|= "foo" != "bar""#, None);
+    let input = Span::new(r#"|= "foo" != "bar""#);
     let (_, toks) = super::lexer::lex::<VerboseError<Span>>(input).unwrap();
 
     let ts = TokenStream::new(&toks);

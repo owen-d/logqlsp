@@ -8,42 +8,84 @@ use tower_lsp::lsp_types::CompletionItem;
 use super::lexer::TokenStream;
 
 // usize stores length of captured input
-pub type Span<'a> = LocatedSpan<&'a str, Option<usize>>;
+pub type Span<'a> = LocatedSpan<&'a str>;
+
+// RefSpanned is a Spanned with a reference to the input
+pub type RefSpanned<'a, T> = Spanned<Span<'a>, T>;
+
+#[derive(Debug, Clone)]
+pub struct Offset {
+    pub line: u32,
+    pub column: u32,
+}
+
+impl<'a> From<Span<'a>> for Offset {
+    fn from(span: Span<'a>) -> Self {
+        Self {
+            line: span.location_line(),
+            column: span.get_utf8_column() as u32,
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct Spanned<'a, T> {
-    pub span: Span<'a>,
+pub struct Spanned<S, T> {
+    pub span: S,
+    pub content_ln: Option<usize>,
     pub value: T,
 }
 
-impl<'a, T> Spanned<'a, T> {
-    pub fn new(span: Span<'a>, value: T) -> Self {
-        Self { span, value }
+impl<S, T> Spanned<S, T> {
+    pub fn new(span: S, value: T) -> Self {
+        Self {
+            span,
+            value,
+            content_ln: None,
+        }
+    }
+
+    pub fn new_with_ln(span: S, value: T, content_ln: usize) -> Self {
+        Self {
+            span,
+            value,
+            content_ln: Some(content_ln),
+        }
     }
 }
 
-impl<'a, T> From<(Span<'a>, T)> for Spanned<'a, T> {
+impl<'a, T> From<(Span<'a>, T)> for Spanned<Span<'a>, T> {
     fn from((span, value): (Span<'a>, T)) -> Self {
-        Self { span, value }
+        Self {
+            span,
+            value,
+            content_ln: None,
+        }
+    }
+}
+impl<S, T> From<(S, T, usize)> for Spanned<S, T> {
+    fn from((span, value, ln): (S, T, usize)) -> Self {
+        Self::new_with_ln(span, value, ln)
     }
 }
 
-impl<'a, A> Spanned<'a, A> {
-    pub fn map_v<B>(self, f: impl FnOnce(A) -> B) -> Spanned<'a, B> {
+impl<S, A> Spanned<S, A> {
+    pub fn map_v<B>(self, f: impl FnOnce(A) -> B) -> Spanned<S, B> {
         Spanned {
             span: self.span,
             value: f(self.value),
+            content_ln: self.content_ln,
         }
     }
-    pub fn map_sp(self, f: impl FnOnce(Span<'a>) -> Span<'a>) -> Spanned<'a, A> {
+    pub fn map_sp<B>(self, f: impl FnOnce(S) -> B) -> Spanned<B, A> {
         Spanned {
             span: f(self.span),
             value: self.value,
+            content_ln: self.content_ln,
         }
     }
 }
 
-impl<T> Deref for Spanned<'_, T> {
+impl<S, T> Deref for Spanned<S, T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
@@ -74,7 +116,7 @@ impl<E> SuggestiveError<E> {
 pub fn spanned<'a, O, O2, E, P, F>(
     mut f: F,
     mut p: P,
-) -> impl FnMut(Span<'a>) -> IResult<Span, Spanned<'a, O2>, E>
+) -> impl FnMut(Span<'a>) -> IResult<Span, Spanned<Span<'a>, O2>, E>
 where
     P: Parser<Span<'a>, O, E>,
     E: nom::error::ParseError<Span<'a>>,
@@ -86,7 +128,6 @@ where
 
         let byte_ln = s1.location_offset() - s.location_offset();
         let content_ln = s.slice(0..byte_ln).fragment().chars().count();
-        let sp = pos.map_extra(|_| Some(content_ln));
-        Ok((s1, Spanned::new(sp, f(x))))
+        Ok((s1, Spanned::new_with_ln(pos, f(x), content_ln)))
     }
 }

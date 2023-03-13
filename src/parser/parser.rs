@@ -12,18 +12,18 @@ use nom_locate::position;
 use super::{
     lexer::{Delimited, Head, Token, TokenStream, Tokenable},
     pipeline::{parse_pipeline_expr, PipelineExpr},
-    utils::{spanned, Span, Spanned},
+    utils::{spanned, RefSpanned, Span, Spanned},
 };
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct LogExpr<'a> {
-    pub selector: Spanned<'a, Selector<'a>>,
-    pipeline: Option<Spanned<'a, PipelineExpr<'a>>>,
+pub struct LogExpr<S> {
+    pub selector: Spanned<S, Selector<S>>,
+    pipeline: Option<Spanned<S, PipelineExpr<S>>>,
 }
 
 pub fn parse_log_expr<'a, E>(
     input: TokenStream<'a>,
-) -> IResult<TokenStream<'a>, Spanned<'a, LogExpr<'a>>, E>
+) -> IResult<TokenStream<'a>, RefSpanned<'a, LogExpr<Span<'a>>>, E>
 where
     E: ParseError<TokenStream<'a>> + ContextError<TokenStream<'a>>,
 {
@@ -43,7 +43,9 @@ pub enum Filter {
     NReq, // !~
 }
 
-pub fn parse_filter<'a, E>(i: TokenStream<'a>) -> IResult<TokenStream<'a>, Spanned<'a, Filter>, E>
+pub fn parse_filter<'a, E>(
+    i: TokenStream<'a>,
+) -> IResult<TokenStream<'a>, RefSpanned<'a, Filter>, E>
 where
     E: ParseError<TokenStream<'a>> + ContextError<TokenStream<'a>>,
 {
@@ -58,9 +60,9 @@ where
 }
 
 // token, stream, spannedtoken, e
-pub fn just<'a, T, Input, Error>(tag: T) -> impl Fn(Input) -> IResult<Input, Spanned<'a, T>, Error>
+pub fn just<S, T, Input, Error>(tag: T) -> impl Fn(Input) -> IResult<Input, Spanned<S, T>, Error>
 where
-    Input: Head<Item = Spanned<'a, T>> + InputTake,
+    Input: Head<Item = Spanned<S, T>> + InputTake,
     T: PartialEq + InputLength,
     Error: ParseError<Input>,
 {
@@ -88,7 +90,7 @@ pub enum MatcherType {
 
 pub fn parse_matcher_type<'a, E>(
     input: TokenStream<'a>,
-) -> IResult<TokenStream<'a>, Spanned<'a, MatcherType>, E>
+) -> IResult<TokenStream<'a>, RefSpanned<'a, MatcherType>, E>
 where
     E: ParseError<TokenStream<'a>> + ContextError<TokenStream<'a>>,
 {
@@ -103,15 +105,15 @@ where
 
 // LabelMatcher is a matcher for a label.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct LabelMatcher<'a> {
-    pub name: Spanned<'a, String>,
-    pub value: Spanned<'a, String>,
-    pub matcher_type: Spanned<'a, MatcherType>,
+pub struct LabelMatcher<S> {
+    pub name: Spanned<S, String>,
+    pub value: Spanned<S, String>,
+    pub matcher_type: Spanned<S, MatcherType>,
 }
 
 pub fn parse_label_matcher<'a, E>(
     input: TokenStream<'a>,
-) -> IResult<TokenStream<'a>, Spanned<'a, LabelMatcher>, E>
+) -> IResult<TokenStream<'a>, RefSpanned<'a, LabelMatcher<Span<'a>>>, E>
 where
     E: ParseError<TokenStream<'a>> + ContextError<TokenStream<'a>>,
 {
@@ -135,13 +137,13 @@ where
 
 // Selector is a set of label matchers.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct Selector<'a> {
-    pub labels: Vec<Spanned<'a, LabelMatcher<'a>>>,
+pub struct Selector<S> {
+    pub labels: Vec<Spanned<S, LabelMatcher<S>>>,
 }
 
 pub fn parse_selector<'a, E>(
     input: TokenStream<'a>,
-) -> IResult<TokenStream<'a>, Spanned<'a, Selector>, E>
+) -> IResult<TokenStream<'a>, RefSpanned<'a, Selector<Span<'a>>>, E>
 where
     E: ParseError<TokenStream<'a>> + ContextError<TokenStream<'a>>,
 {
@@ -166,7 +168,7 @@ macro_rules! impl_token_type_parser {
     ($name: ident, $i:ident, $return_ty:ty, $extractor:expr) => {
         pub(crate) fn $name<'a, E>(
             input: TokenStream<'a>,
-        ) -> IResult<TokenStream<'a>, Spanned<'a, $return_ty>, E>
+        ) -> IResult<TokenStream<'a>, RefSpanned<'a, $return_ty>, E>
         where
             E: ParseError<TokenStream<'a>> + ContextError<TokenStream<'a>>,
         {
@@ -194,7 +196,7 @@ impl_token_type_parser!(parse_delimiter, Delimiter, Delimited<String>, |x| x);
 #[cfg(test)]
 #[test]
 fn test_parse_filter() {
-    let input = Span::new_extra("|=", None);
+    let input = Span::new("|=");
     let (_, toks) = super::lexer::lex::<VerboseError<Span>>(input).unwrap();
 
     let ts = TokenStream::new(&toks);
@@ -206,7 +208,7 @@ fn test_parse_filter() {
 #[cfg(test)]
 #[test]
 fn test_parse_label_matcher() {
-    let input = Span::new_extra(r#"foo="bar""#, None);
+    let input = Span::new(r#"foo="bar""#);
     let (_, toks) = super::lexer::lex::<VerboseError<Span>>(input).unwrap();
 
     let ts = TokenStream::new(&toks);
@@ -221,7 +223,7 @@ fn test_parse_label_matcher() {
 #[cfg(test)]
 #[test]
 fn test_parse_selector() {
-    let input = Span::new_extra(r#"{foo="bar", bazz!~"buzz"}"#, None);
+    let input = Span::new(r#"{foo="bar", bazz!~"buzz"}"#);
     let (_, toks) = super::lexer::lex::<VerboseError<Span>>(input).unwrap();
 
     let ts = TokenStream::new(&toks);
