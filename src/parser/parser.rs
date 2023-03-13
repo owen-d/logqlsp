@@ -194,7 +194,7 @@ impl_token_type_parser!(parse_delimiter, Delimiter, Delimited<String>, |x| x);
 #[cfg(test)]
 #[test]
 fn test_parse_filter() {
-    let input = Span::new("|=");
+    let input = Span::new_extra("|=", None);
     let (_, toks) = super::lexer::lex::<VerboseError<Span>>(input).unwrap();
 
     let ts = TokenStream::new(&toks);
@@ -206,7 +206,7 @@ fn test_parse_filter() {
 #[cfg(test)]
 #[test]
 fn test_parse_label_matcher() {
-    let input = Span::new(r#"foo="bar""#);
+    let input = Span::new_extra(r#"foo="bar""#, None);
     let (_, toks) = super::lexer::lex::<VerboseError<Span>>(input).unwrap();
 
     let ts = TokenStream::new(&toks);
@@ -221,7 +221,7 @@ fn test_parse_label_matcher() {
 #[cfg(test)]
 #[test]
 fn test_parse_selector() {
-    let input = Span::new(r#"{foo="bar", bazz!~"buzz"}"#);
+    let input = Span::new_extra(r#"{foo="bar", bazz!~"buzz"}"#, None);
     let (_, toks) = super::lexer::lex::<VerboseError<Span>>(input).unwrap();
 
     let ts = TokenStream::new(&toks);

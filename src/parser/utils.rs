@@ -1,13 +1,14 @@
 use core::fmt;
 use std::{fmt::Display, ops::Deref};
 
-use nom::{error::ParseError, IResult, Parser};
+use nom::{error::ParseError, IResult, Parser, Slice};
 use nom_locate::{position, LocatedSpan};
 use tower_lsp::lsp_types::CompletionItem;
 
 use super::lexer::TokenStream;
 
-pub type Span<'a> = LocatedSpan<&'a str>;
+// usize stores length of captured input
+pub type Span<'a> = LocatedSpan<&'a str, Option<usize>>;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Spanned<'a, T> {
@@ -70,17 +71,22 @@ impl<E> SuggestiveError<E> {
 }
 
 // Run a parser, extracting the position and mapping the result
-pub fn spanned<I, O, O2, O3, E, P, F>(mut f: F, mut p: P) -> impl FnMut(I) -> IResult<I, O3, E>
+pub fn spanned<'a, O, O2, E, P, F>(
+    mut f: F,
+    mut p: P,
+) -> impl FnMut(Span<'a>) -> IResult<Span, Spanned<'a, O2>, E>
 where
-    P: Parser<I, O, E>,
-    E: nom::error::ParseError<I>,
-    I: nom::InputTake + nom::InputIter,
+    P: Parser<Span<'a>, O, E>,
+    E: nom::error::ParseError<Span<'a>>,
     F: FnMut(O) -> O2,
-    (I, O2): Into<O3>,
 {
     move |s| {
         let (s, pos) = position(s)?;
-        let (s, x) = p.parse(s)?;
-        Ok((s, (pos, f(x)).into()))
+        let (s1, x) = p.parse(s)?;
+
+        let byte_ln = s1.location_offset() - s.location_offset();
+        let content_ln = s.slice(0..byte_ln).fragment().chars().count();
+        let sp = pos.map_extra(|_| Some(content_ln));
+        Ok((s1, Spanned::new(sp, f(x))))
     }
 }

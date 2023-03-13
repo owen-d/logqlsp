@@ -1,4 +1,7 @@
+use std::sync::Arc;
+
 use dashmap::DashMap;
+use logql_language_server::parser::parser::LogExpr;
 use ropey::Rope;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -6,14 +9,12 @@ use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 
-#[derive(Debug, Deserialize, Serialize)]
-pub struct Todo(u8);
 #[derive(Debug)]
 struct Backend {
     client: Client,
-    ast_map: DashMap<String, Expr>,
+    ast_map: DashMap<String, ()>,
     document_map: DashMap<String, Rope>,
-    semantic_token_map: DashMap<String, Vec<InCompleteSemanticToken>>,
+    semantic_token_map: DashMap<String, ()>,
 }
 
 #[tower_lsp::async_trait]

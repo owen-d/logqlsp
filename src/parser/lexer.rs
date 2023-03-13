@@ -17,6 +17,7 @@ use nom::{
 };
 use nom::{Compare, InputLength, InputTake, InputTakeAtPosition, Needed, Parser};
 use nom_locate::position;
+use tower_lsp::lsp_types::SemanticTokenType;
 
 use super::utils::{spanned, Span, Spanned};
 
@@ -35,6 +36,17 @@ pub enum Token {
     Identifier(String),
     // (, ), [, ], {, }, ", `, ,, |, =, ~, !, *, /, +, -, #, \n
     Delimiter(Delimited<String>),
+}
+
+impl Token {
+    pub fn semantic_token_type(&self) -> SemanticTokenType {
+        match self {
+            Token::Comment(_) => SemanticTokenType::COMMENT,
+            Token::String(_) => SemanticTokenType::STRING,
+            Token::Identifier(_) => SemanticTokenType::VARIABLE,
+            Token::Delimiter(_) => SemanticTokenType::OPERATOR,
+        }
+    }
 }
 
 impl InputLength for Token {
@@ -365,7 +377,7 @@ where
 #[cfg(test)]
 #[test]
 fn test_string() {
-    let input = Span::new(r#""fo\"o""#);
+    let input = Span::new_extra(r#""fo\"o""#, None);
     let (s, tok) = string::<VerboseError<Span>>(input).unwrap();
     assert_eq!("", *s.fragment());
     let expected_tok = Token::String("\"fo\\\"o\"".to_string());
@@ -375,7 +387,7 @@ fn test_string() {
 #[cfg(test)]
 #[test]
 fn test_raw_string() {
-    let input = Span::new(r#"`foo\`"#);
+    let input = Span::new_extra(r#"`foo\`"#, None);
     let (s, tok) = string::<VerboseError<Span>>(input).unwrap();
     assert_eq!("", *s.fragment());
     let expected_tok: Token = Token::String(r#"`foo\`"#.to_string());
@@ -385,9 +397,10 @@ fn test_raw_string() {
 #[cfg(test)]
 #[test]
 fn test_input() {
-    let input = Span::new(
+    let input = Span::new_extra(
         r#"{foo="bar", bazz!="buzz"} |= "bonk" |= `\n` |= "sno\"t " # foo|bar"
-        #final"#,
+#final"#,
+        None,
     );
     let (s, toks) = lex::<VerboseError<Span>>(input).unwrap();
     assert_eq!("", *s.fragment());
@@ -410,7 +423,17 @@ fn test_input() {
         " foo|bar\"".comment(),
         "final".comment(),
     ];
+
+    let x = toks[toks.len() - 1].clone();
+    assert_eq!(2, x.span.location_line());
+    assert_eq!(1, x.span.get_utf8_column());
+
     assert_eq!(
+        // expected_toks
+        //     .into_iter()
+        //     .map(|x| (Span::new_extra("", None), x).into())
+        //     .collect::<Vec<Spanned<Token>>>(),
+        // toks,
         expected_toks,
         toks.into_iter()
             .map(|x: Spanned<Token>| x.value)
