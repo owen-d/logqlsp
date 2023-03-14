@@ -207,7 +207,7 @@ impl_token_type_parser!(parse_delimiter, Delimiter, Delimited<String>, |x| x);
 #[cfg(test)]
 #[test]
 fn test_parse_filter() {
-    let input = Span::new("|=");
+    let input = "|=";
     let (_, toks) = super::lexer::lex::<VerboseError<Span>>(input).unwrap();
 
     let ts = TokenStream::new(&toks);
