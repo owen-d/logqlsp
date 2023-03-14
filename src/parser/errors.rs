@@ -30,9 +30,13 @@ use std::fmt::{Debug, Display, Error, Formatter};
 
 use nom::{
     error::{ErrorKind, FromExternalError, ParseError},
-    InputLength,
+    InputIter, InputLength, Offset,
 };
-use nom_supreme::{context::ContextError, error::ErrorTree, tag::TagError};
+use nom_supreme::{
+    context::ContextError, error::ErrorTree, final_parser::RecreateContext, tag::TagError,
+};
+
+use super::lexer::{Head, TokenStream};
 
 // shorthand for all the error dependencies when building parsers
 pub trait Errorable<I>:
@@ -121,6 +125,22 @@ where
     fn from_tag(input: I, tag: T) -> Self {
         SuggestiveError {
             error: ErrorTree::from_tag(input, tag),
+        }
+    }
+}
+
+// Allows us to remap to the source string via a TokenStream in ErrorTree
+impl<'a> RecreateContext<TokenStream<'a>> for &'a str {
+    fn recreate_context(_original_input: TokenStream<'a>, tail: TokenStream<'a>) -> Self {
+        match tail.head() {
+            Some(x) => {
+                let offset = tail.src.offset(x.span);
+                &tail.src[offset..]
+            }
+            None => {
+                // we're at end of input, return the empty tail
+                &tail.src[tail.src.len()..]
+            }
         }
     }
 }

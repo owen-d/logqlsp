@@ -76,7 +76,7 @@ fn test_parse_pipeline_expr() {
     let input = r#"|= "foo" != "bar""#;
     let (_, toks) = super::lexer::lex::<VerboseError<Span>>(input).unwrap();
 
-    let ts = TokenStream::new(&toks);
+    let ts = TokenStream::new(input, &toks);
 
     let got = parse_pipeline_expr::<VerboseError<_>>(ts.clone()).finish();
     match got {

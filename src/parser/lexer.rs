@@ -147,20 +147,17 @@ pub struct Stubby {}
 pub type Result<'a, E> = IResult<Span<'a>, RefSpanned<'a, Token>, E>;
 
 #[derive(Clone, Debug)]
-pub struct TokenStream<'a>(&'a [RefSpanned<'a, Token>]);
+pub struct TokenStream<'a> {
+    toks: &'a [RefSpanned<'a, Token>],
+    pub src: &'a str,
+}
+
 impl<'a> TokenStream<'a> {
-    pub fn new(toks: &'a [RefSpanned<'a, Token>]) -> Self {
-        Self(toks)
+    pub fn new(src: &'a str, toks: &'a [RefSpanned<'a, Token>]) -> Self {
+        Self { toks, src }
     }
 }
 
-impl<'a> Deref for TokenStream<'a> {
-    type Target = str;
-
-    fn deref(&self) -> &Self::Target {
-        self.0.get(0).map_or("", |x| x.span)
-    }
-}
 // helper trait for dequeing first token
 pub trait Head {
     type Item;
@@ -171,13 +168,13 @@ impl<'a> Head for TokenStream<'a> {
     type Item = RefSpanned<'a, Token>;
 
     fn head(&self) -> Option<Self::Item> {
-        self.0.get(0).map(|x| x.clone())
+        self.toks.get(0).map(|x| x.clone())
     }
 }
 
 impl<'a> Compare<Token> for TokenStream<'a> {
     fn compare(&self, t: Token) -> nom::CompareResult {
-        match self.0.get(0) {
+        match self.toks.get(0) {
             Some(sp) if sp.value == t => nom::CompareResult::Ok,
             Some(_) => nom::CompareResult::Error,
             None => nom::CompareResult::Incomplete,
@@ -205,7 +202,7 @@ impl<'a> InputIter for TokenStream<'a> {
 
     fn iter_elements(&self) -> Self::IterElem {
         TokenIter {
-            iter: self.0.iter(),
+            iter: self.toks.iter(),
         }
     }
 
@@ -230,7 +227,7 @@ impl<'a> InputIter for TokenStream<'a> {
             cnt += 1;
         }
         if cnt == count {
-            return Ok(self.0.len());
+            return Ok(self.toks.len());
         }
         Err(Needed::Unknown)
     }
@@ -238,19 +235,19 @@ impl<'a> InputIter for TokenStream<'a> {
 
 impl InputTake for TokenStream<'_> {
     fn take(&self, count: usize) -> Self {
-        Self(&self.0[..count])
+        Self::new(self.src, &self.toks[..count])
     }
 
     fn take_split(&self, count: usize) -> (Self, Self) {
         let prefix = self.take(count);
-        let suffix = Self(&self.0[count..]);
+        let suffix = Self::new(self.src, &self.toks[count..]);
         (suffix, prefix)
     }
 }
 
 impl InputLength for TokenStream<'_> {
     fn input_len(&self) -> usize {
-        self.0.len()
+        self.toks.len()
     }
 }
 
