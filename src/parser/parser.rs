@@ -8,6 +8,7 @@ use nom::{
     Compare, CompareResult, IResult, InputLength, InputTake, Parser,
 };
 use nom_locate::position;
+use nom_supreme::tag::TagError;
 
 use super::{
     lexer::{Delimited, Head, Token, TokenStream, Tokenable},
@@ -25,7 +26,9 @@ pub fn parse<'a, E>(
     input: TokenStream<'a>,
 ) -> IResult<TokenStream<'a>, RefSpanned<'a, LogExpr<Span<'a>>>, E>
 where
-    E: ParseError<TokenStream<'a>> + ContextError<TokenStream<'a>>,
+    E: ParseError<TokenStream<'a>>
+        + ContextError<TokenStream<'a>>
+        + TagError<TokenStream<'a>, Token>,
 {
     terminated(parse_log_expr, eof)(input)
 }
@@ -34,7 +37,9 @@ pub fn parse_log_expr<'a, E>(
     input: TokenStream<'a>,
 ) -> IResult<TokenStream<'a>, RefSpanned<'a, LogExpr<Span<'a>>>, E>
 where
-    E: ParseError<TokenStream<'a>> + ContextError<TokenStream<'a>>,
+    E: ParseError<TokenStream<'a>>
+        + ContextError<TokenStream<'a>>
+        + TagError<TokenStream<'a>, Token>,
 {
     context("log_expr", move |input| {
         let (input, selector) = parse_selector(input)?;
@@ -58,7 +63,9 @@ pub fn parse_filter<'a, E>(
     i: TokenStream<'a>,
 ) -> IResult<TokenStream<'a>, RefSpanned<'a, Filter>, E>
 where
-    E: ParseError<TokenStream<'a>> + ContextError<TokenStream<'a>>,
+    E: ParseError<TokenStream<'a>>
+        + ContextError<TokenStream<'a>>
+        + TagError<TokenStream<'a>, Token>,
 {
     let mappings = (
         map(just("|=".delimiter()), |x| x.map_v(|_| Filter::Eq)),
@@ -70,12 +77,11 @@ where
     context("filter", alt(mappings))(i)
 }
 
-// token, stream, spannedtoken, e
 pub fn just<S, T, Input, Error>(tag: T) -> impl Fn(Input) -> IResult<Input, Spanned<S, T>, Error>
 where
     Input: Head<Item = Spanned<S, T>> + InputTake,
     T: PartialEq + InputLength,
-    Error: ParseError<Input>,
+    Error: ParseError<Input> + TagError<Input, T>,
 {
     move |i: Input| {
         if let Some(found) = i.head() {
@@ -103,7 +109,9 @@ pub fn parse_matcher_type<'a, E>(
     input: TokenStream<'a>,
 ) -> IResult<TokenStream<'a>, RefSpanned<'a, MatcherType>, E>
 where
-    E: ParseError<TokenStream<'a>> + ContextError<TokenStream<'a>>,
+    E: ParseError<TokenStream<'a>>
+        + ContextError<TokenStream<'a>>
+        + TagError<TokenStream<'a>, Token>,
 {
     let mappings = (
         map(just("=".delimiter()), |x| x.map_v(|_| MatcherType::Eq)),
@@ -126,7 +134,9 @@ pub fn parse_label_matcher<'a, E>(
     input: TokenStream<'a>,
 ) -> IResult<TokenStream<'a>, RefSpanned<'a, LabelMatcher<Span<'a>>>, E>
 where
-    E: ParseError<TokenStream<'a>> + ContextError<TokenStream<'a>>,
+    E: ParseError<TokenStream<'a>>
+        + ContextError<TokenStream<'a>>
+        + TagError<TokenStream<'a>, Token>,
 {
     let mut p = context("label_matcher", |i| {
         let label_name = context("label_name", parse_identifier);
@@ -156,7 +166,9 @@ pub fn parse_selector<'a, E>(
     input: TokenStream<'a>,
 ) -> IResult<TokenStream<'a>, RefSpanned<'a, Selector<Span<'a>>>, E>
 where
-    E: ParseError<TokenStream<'a>> + ContextError<TokenStream<'a>>,
+    E: ParseError<TokenStream<'a>>
+        + ContextError<TokenStream<'a>>
+        + TagError<TokenStream<'a>, Token>,
 {
     context("selector", |input| {
         // extract the span for the beginning of the selector

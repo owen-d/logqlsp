@@ -93,25 +93,6 @@ impl<S, T> Deref for Spanned<S, T> {
     }
 }
 
-// For use somewhere down the line
-#[derive(Debug, Clone)]
-pub struct SuggestiveError<A> {
-    err: A,
-    completions: Option<Vec<CompletionItem>>,
-}
-
-impl<T: Display> Display for SuggestiveError<T> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.err)
-    }
-}
-
-impl<E> SuggestiveError<E> {
-    pub fn new(err: E, completions: Option<Vec<CompletionItem>>) -> Self {
-        Self { err, completions }
-    }
-}
-
 // Run a parser, extracting the position and mapping the result
 pub fn spanned<'a, O, O2, E, P, F>(
     mut f: F,

@@ -7,7 +7,7 @@ use std::vec;
 use nom::error::VerboseError;
 use nom::{
     branch::alt,
-    bytes::complete::{escaped, is_not, tag, take_until, take_while},
+    bytes::complete::{escaped, is_not, take_until, take_while},
     character::complete::{multispace0, one_of},
     combinator::{eof, map},
     error::ParseError,
@@ -17,7 +17,9 @@ use nom::{
 };
 use nom::{Compare, InputLength, InputTake, InputTakeAtPosition, Needed, Parser};
 use nom_locate::position;
-use tower_lsp::lsp_types::SemanticTokenType;
+use nom_supreme::tag::complete::tag;
+use nom_supreme::tag::TagError;
+use tower_lsp::lsp_types::{DidChangeWatchedFilesRegistrationOptions, SemanticTokenType};
 
 use super::utils::{spanned, RefSpanned, Span, Spanned};
 
@@ -275,9 +277,10 @@ impl<'a> Iterator for TokenIndices<'a> {
 }
 
 // ------------------------------ Logic ------------------------------
-pub fn lex<'a, E: ParseError<Span<'a>>>(
-    input: Span<'a>,
-) -> IResult<Span<'a>, Vec<RefSpanned<'a, Token>>, E> {
+pub fn lex<'a, E>(input: Span<'a>) -> IResult<Span<'a>, Vec<RefSpanned<'a, Token>>, E>
+where
+    E: ParseError<Span<'a>> + TagError<Span<'a>, &'static str>,
+{
     // todo(owen-d): implement escaped strings
 
     let multi_char_delims = |s| {
@@ -306,11 +309,17 @@ pub fn lex<'a, E: ParseError<Span<'a>>>(
     tokens.parse(input)
 }
 
-fn string<'a, E: ParseError<Span<'a>>>(input: Span<'a>) -> Result<E> {
+fn string<'a, E>(input: Span<'a>) -> Result<E>
+where
+    E: ParseError<Span<'a>> + TagError<Span<'a>, &'static str>,
+{
     alt((raw_string, double_quoted_string)).parse(input)
 }
 
-fn double_quoted_string<'a, E: ParseError<Span<'a>>>(input: Span<'a>) -> Result<E> {
+fn double_quoted_string<'a, E>(input: Span<'a>) -> Result<E>
+where
+    E: ParseError<Span<'a>> + TagError<Span<'a>, &'static str>,
+{
     fn except_control_or_quote<T, E: ParseError<T>>(input: T) -> IResult<T, T, E>
     where
         T: nom::InputTakeAtPosition,
@@ -322,9 +331,10 @@ fn double_quoted_string<'a, E: ParseError<Span<'a>>>(input: Span<'a>) -> Result<
         )
     }
 
-    fn parse<'a, E: ParseError<Span<'a>>>(
-        i: Span<'a>,
-    ) -> IResult<Span<'a>, (Span<'a>, Span<'a>, Span<'a>), E> {
+    fn parse<'a, E>(i: Span<'a>) -> IResult<Span<'a>, (Span<'a>, Span<'a>, Span<'a>), E>
+    where
+        E: ParseError<Span<'a>> + TagError<Span<'a>, &'static str>,
+    {
         (
             tag(r#"""#),
             escaped(except_control_or_quote, '\\', one_of(r#""n\"#)),
@@ -336,10 +346,14 @@ fn double_quoted_string<'a, E: ParseError<Span<'a>>>(input: Span<'a>) -> Result<
     spanned(|(_, x, _)| x.string_tok("\""), parse).parse(input)
 }
 
-fn raw_string<'a, E: ParseError<Span<'a>>>(input: Span<'a>) -> Result<E> {
-    fn parse<'a, E: ParseError<Span<'a>>>(
-        i: Span<'a>,
-    ) -> IResult<Span<'a>, (Span<'a>, Span<'a>, Span<'a>), E> {
+fn raw_string<'a, E: ParseError<Span<'a>>>(input: Span<'a>) -> Result<E>
+where
+    E: ParseError<Span<'a>> + TagError<Span<'a>, &'static str>,
+{
+    fn parse<'a, E>(i: Span<'a>) -> IResult<Span<'a>, (Span<'a>, Span<'a>, Span<'a>), E>
+    where
+        E: ParseError<Span<'a>> + TagError<Span<'a>, &'static str>,
+    {
         (tag(r"`"), is_not("`"), tag(r"`")).parse(i)
     }
 
@@ -351,7 +365,10 @@ fn word<'a, E: ParseError<Span<'a>>>(input: Span<'a>) -> Result<E> {
     spanned(|x: Span| x.identifier(), take_while(is_valid)).parse(input)
 }
 
-fn comment<'a, E: ParseError<Span<'a>>>(input: Span<'a>) -> Result<E> {
+fn comment<'a, E>(input: Span<'a>) -> Result<E>
+where
+    E: ParseError<Span<'a>> + TagError<Span<'a>, &'static str>,
+{
     spanned(
         |x| x.comment(),
         terminated(

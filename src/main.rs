@@ -6,7 +6,7 @@ use logql_language_server::parser::lexer::{lex, Token, TokenStream};
 use logql_language_server::parser::parser::{parse, parse_log_expr, LogExpr};
 use logql_language_server::parser::utils::{Offset, Span, Spanned};
 use logql_language_server::semantic_tokens::{SemanticTokens, LEGEND_TYPE};
-use nom::error::{convert_error, VerboseError};
+use nom::error::{convert_error, VerboseError, VerboseErrorKind};
 use nom::Finish;
 use ropey::Rope;
 use serde::{Deserialize, Serialize};
@@ -255,8 +255,16 @@ impl Backend {
                             .await
                     }
                     Err(e) => {
+                        let without_input = e
+                            .errors
+                            .iter()
+                            .map(|(_, e)| e.clone())
+                            .collect::<Vec<VerboseErrorKind>>();
                         self.client
-                            .log_message(MessageType::INFO, format!("parse error:\n{:#?}", e))
+                            .log_message(
+                                MessageType::INFO,
+                                format!("parse error:\n{:#?}", without_input),
+                            )
                             .await;
                     }
                 }
