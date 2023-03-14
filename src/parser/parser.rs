@@ -1,7 +1,7 @@
 use nom::{
     branch::alt,
     bytes::complete::tag,
-    combinator::{map, opt, peek},
+    combinator::{eof, map, opt, peek},
     error::{context, make_error, ContextError, Error, ErrorKind, ParseError, VerboseError},
     multi::separated_list0,
     sequence::{delimited, separated_pair, terminated, Tuple},
@@ -21,18 +21,29 @@ pub struct LogExpr<S> {
     pipeline: Option<Spanned<S, PipelineExpr<S>>>,
 }
 
+pub fn parse<'a, E>(
+    input: TokenStream<'a>,
+) -> IResult<TokenStream<'a>, RefSpanned<'a, LogExpr<Span<'a>>>, E>
+where
+    E: ParseError<TokenStream<'a>> + ContextError<TokenStream<'a>>,
+{
+    terminated(parse_log_expr, eof)(input)
+}
+
 pub fn parse_log_expr<'a, E>(
     input: TokenStream<'a>,
 ) -> IResult<TokenStream<'a>, RefSpanned<'a, LogExpr<Span<'a>>>, E>
 where
     E: ParseError<TokenStream<'a>> + ContextError<TokenStream<'a>>,
 {
-    let (input, selector) = parse_selector(input)?;
-    let (input, pipeline) = opt(parse_pipeline_expr)(input)?;
-    Ok((
-        input,
-        Spanned::from((selector.span.clone(), LogExpr { selector, pipeline })),
-    ))
+    context("log_expr", move |input| {
+        let (input, selector) = parse_selector(input)?;
+        let (input, pipeline) = opt(parse_pipeline_expr)(input)?;
+        Ok((
+            input,
+            Spanned::from((selector.span.clone(), LogExpr { selector, pipeline })),
+        ))
+    })(input)
 }
 
 #[derive(Debug, Clone, PartialEq)]

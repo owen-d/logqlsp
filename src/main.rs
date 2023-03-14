@@ -1,8 +1,9 @@
 use std::sync::Arc;
 
 use dashmap::DashMap;
+use log::warn;
 use logql_language_server::parser::lexer::{lex, Token, TokenStream};
-use logql_language_server::parser::parser::LogExpr;
+use logql_language_server::parser::parser::{parse, parse_log_expr, LogExpr};
 use logql_language_server::parser::utils::{Offset, Span, Spanned};
 use logql_language_server::semantic_tokens::{SemanticTokens, LEGEND_TYPE};
 use nom::error::{convert_error, VerboseError};
@@ -62,7 +63,8 @@ impl LanguageServer for Backend {
                                     document_selector: Some(vec![DocumentFilter {
                                         language: Some("logql".to_string()),
                                         scheme: Some("file".to_string()),
-                                        pattern: Some("*.logql".to_string()),
+                                        // pattern: Some("*.logql".to_string()),
+                                        pattern: None,
                                     }]),
                                 }
                             },
@@ -150,6 +152,12 @@ impl LanguageServer for Backend {
         .await
     }
 
+    async fn did_save(&self, _: DidSaveTextDocumentParams) {
+        self.client
+            .log_message(MessageType::INFO, "file saved!")
+            .await;
+    }
+
     async fn did_close(&self, _: DidCloseTextDocumentParams) {
         self.client
             .log_message(MessageType::INFO, "file closed!")
@@ -157,6 +165,9 @@ impl LanguageServer for Backend {
     }
 
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
+        self.client
+            .log_message(MessageType::INFO, "completion")
+            .await;
         let _ = params;
         Ok(None)
     }
@@ -175,9 +186,6 @@ impl LanguageServer for Backend {
                 Some(toks) => {
                     let mut tokens = Vec::new();
                     toks.semantic_tokens(&mut tokens);
-                    self.client
-                        .log_message(MessageType::INFO, format!("{:#?}", tokens))
-                        .await;
                     return Ok(Some(SemanticTokensResult::Tokens(
                         lsp_types::SemanticTokens {
                             result_id: None,
@@ -205,9 +213,6 @@ impl LanguageServer for Backend {
                 Some(toks) => {
                     let mut tokens = Vec::new();
                     toks.semantic_tokens(&mut tokens);
-                    self.client
-                        .log_message(MessageType::INFO, format!("{:#?}", tokens))
-                        .await;
                     return Ok(Some(SemanticTokensRangeResult::Tokens(
                         lsp_types::SemanticTokens {
                             result_id: None,
@@ -224,6 +229,9 @@ impl LanguageServer for Backend {
 
 impl Backend {
     async fn on_change(&self, params: TextDocumentItem) {
+        self.client
+            .log_message(MessageType::INFO, "did change")
+            .await;
         let input = Span::new(params.text.as_str());
         let lexed = lex::<VerboseError<Span>>(input).finish();
         let mut f = File {
@@ -233,8 +241,25 @@ impl Backend {
         match lexed {
             Ok((_, toks)) => {
                 // map spans into a non-referenced variant
-                let mapped = toks.into_iter().map(|x| x.map_sp(Offset::from)).collect();
+                let mapped = toks
+                    .clone()
+                    .into_iter()
+                    .map(|x| x.map_sp(Offset::from))
+                    .collect();
                 f.tokens = Some(mapped);
+
+                match parse::<VerboseError<_>>(TokenStream::new(&toks)).finish() {
+                    Ok((_, expr)) => {
+                        self.client
+                            .log_message(MessageType::INFO, format!("expr: {:#?}", expr))
+                            .await
+                    }
+                    Err(e) => {
+                        self.client
+                            .log_message(MessageType::INFO, format!("parse error:\n{:#?}", e))
+                            .await;
+                    }
+                }
 
                 None
             }
@@ -246,7 +271,7 @@ impl Backend {
                     .map(|(input, error)| (*input.fragment(), error.clone()))
                     .collect();
                 self.client
-                    .log_message(MessageType::INFO, format!("{:?}", e))
+                    .log_message(MessageType::INFO, format!("lex error:\n{:?}", e))
                     .await;
                 Some(convert_error(*input.fragment(), VerboseError { errors }))
             }

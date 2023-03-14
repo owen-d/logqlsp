@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use log::warn;
 use nom::InputIter;
 use tower_lsp::lsp_types::{SemanticToken, SemanticTokenType};
 
@@ -45,9 +46,8 @@ impl SemanticTokens for Vec<Spanned<Offset, Token>> {
 
             // offset is line-relative
             let offset_diff = if line_diff == 0 {
-                let curr = sp.column;
-                let res = curr - last_start;
-                last_start = last_start + curr;
+                let res = sp.column - last_start;
+                last_start = last_start + res;
                 res
             } else {
                 let curr = sp.column;
