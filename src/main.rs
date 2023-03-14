@@ -10,6 +10,8 @@ use logql_language_server::semantic_tokens::{SemanticTokens, LEGEND_TYPE};
 use nom::error::{convert_error, VerboseError, VerboseErrorKind};
 use nom::Finish;
 use nom_supreme::error::ErrorTree;
+use nom_supreme::final_parser::final_parser;
+use nom_supreme::final_parser::Location;
 use ropey::Rope;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -27,7 +29,7 @@ struct Backend {
 #[derive(Debug)]
 struct File {
     uri: String,
-    tokens: Option<Vec<Spanned<Offset, Token>>>,
+    tokens: Option<Vec<Spanned<Location, Token>>>,
 }
 
 #[tower_lsp::async_trait]
@@ -234,7 +236,7 @@ impl Backend {
         self.client
             .log_message(MessageType::INFO, "did change")
             .await;
-        let input = Span::new(params.text.as_str());
+        let input = params.text.as_str();
         let lexed = lex::<ErrorTree<Span>>(input).finish();
         let mut f = File {
             uri: params.uri.to_string(),
@@ -246,9 +248,11 @@ impl Backend {
                 let mapped = toks
                     .clone()
                     .into_iter()
-                    .map(|x| x.map_sp(Offset::from))
+                    .map(|x| x.map_sp(|s| Location::locate_tail(input, s)))
                     .collect();
                 f.tokens = Some(mapped);
+
+                // let _x = final_parser(parse::<SuggestiveError<_>>)(TokenStream::new(&toks));
 
                 match parse::<SuggestiveError<_>>(TokenStream::new(&toks)).finish() {
                     Ok((_, expr)) => {

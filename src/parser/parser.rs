@@ -219,7 +219,7 @@ fn test_parse_filter() {
 #[cfg(test)]
 #[test]
 fn test_parse_label_matcher() {
-    let input = Span::new(r#"foo="bar""#);
+    let input = r#"foo="bar""#;
     let (_, toks) = super::lexer::lex::<VerboseError<Span>>(input).unwrap();
 
     let ts = TokenStream::new(&toks);
@@ -234,7 +234,7 @@ fn test_parse_label_matcher() {
 #[cfg(test)]
 #[test]
 fn test_parse_selector() {
-    let input = Span::new(r#"{foo="bar", bazz!~"buzz"}"#);
+    let input = r#"{foo="bar", bazz!~"buzz"}"#;
     let (_, toks) = super::lexer::lex::<VerboseError<Span>>(input).unwrap();
 
     let ts = TokenStream::new(&toks);

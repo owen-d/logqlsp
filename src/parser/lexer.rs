@@ -158,7 +158,7 @@ impl<'a> Deref for TokenStream<'a> {
     type Target = str;
 
     fn deref(&self) -> &Self::Target {
-        self.0.get(0).map_or("", |x| x.span.fragment())
+        self.0.get(0).map_or("", |x| x.span)
     }
 }
 // helper trait for dequeing first token
@@ -404,9 +404,9 @@ where
 #[cfg(test)]
 #[test]
 fn test_string() {
-    let input = Span::new(r#""fo\"o""#);
+    let input = r#""fo\"o""#;
     let (s, tok) = string::<VerboseError<Span>>(input).unwrap();
-    assert_eq!("", *s.fragment());
+    assert_eq!("", s);
     let expected_tok = Token::String("\"fo\\\"o\"".to_string());
     assert_eq!(expected_tok, *tok)
 }
@@ -414,9 +414,9 @@ fn test_string() {
 #[cfg(test)]
 #[test]
 fn test_raw_string() {
-    let input = Span::new(r#"`foo\`"#);
+    let input = r#"`foo\`"#;
     let (s, tok) = string::<VerboseError<Span>>(input).unwrap();
-    assert_eq!("", *s.fragment());
+    assert_eq!("", s);
     let expected_tok: Token = Token::String(r#"`foo\`"#.to_string());
     assert_eq!(expected_tok, *tok)
 }
@@ -424,12 +424,12 @@ fn test_raw_string() {
 #[cfg(test)]
 #[test]
 fn test_input() {
-    let input = Span::new(
-        r#"{foo="bar", bazz!="buzz"} |= "bonk" |= `\n` |= "sno\"t " # foo|bar"
-#final"#,
-    );
+    use nom_supreme::final_parser::Location;
+
+    let input = r#"{foo="bar", bazz!="buzz"} |= "bonk" |= `\n` |= "sno\"t " # foo|bar"
+#final"#;
     let (s, toks) = lex::<VerboseError<Span>>(input).unwrap();
-    assert_eq!("", *s.fragment());
+    assert_eq!("", s);
     let expected_toks: Vec<Token> = vec![
         "{".delimiter(),
         "foo".identifier(),
@@ -451,8 +451,9 @@ fn test_input() {
     ];
 
     let x = toks[toks.len() - 1].clone();
-    assert_eq!(2, x.span.location_line());
-    assert_eq!(1, x.span.get_utf8_column());
+    let loc = Location::locate_tail(input, x.span);
+    assert_eq!(2, loc.line);
+    assert_eq!(1, loc.column);
 
     assert_eq!(
         // expected_toks

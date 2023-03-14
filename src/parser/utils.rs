@@ -8,7 +8,7 @@ use tower_lsp::lsp_types::CompletionItem;
 use super::lexer::TokenStream;
 
 // usize stores length of captured input
-pub type Span<'a> = LocatedSpan<&'a str>;
+pub type Span<'a> = &'a str;
 
 // RefSpanned is a Spanned with a reference to the input
 pub type RefSpanned<'a, T> = Spanned<Span<'a>, T>;
@@ -17,15 +17,6 @@ pub type RefSpanned<'a, T> = Spanned<Span<'a>, T>;
 pub struct Offset {
     pub line: u32,
     pub column: u32,
-}
-
-impl<'a> From<Span<'a>> for Offset {
-    fn from(span: Span<'a>) -> Self {
-        Self {
-            line: span.location_line(),
-            column: span.get_utf8_column() as u32,
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -107,8 +98,7 @@ where
         let (s, pos) = position(s)?;
         let (s1, x) = p.parse(s)?;
 
-        let byte_ln = s1.location_offset() - s.location_offset();
-        let content_ln = s.slice(0..byte_ln).fragment().chars().count();
+        let content_ln = s.slice(0..s.len() - s1.len()).chars().count();
         Ok((s1, Spanned::new_with_ln(pos, f(x), content_ln)))
     }
 }

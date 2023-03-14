@@ -73,7 +73,7 @@ where
 
 #[test]
 fn test_parse_pipeline_expr() {
-    let input = Span::new(r#"|= "foo" != "bar""#);
+    let input = r#"|= "foo" != "bar""#;
     let (_, toks) = super::lexer::lex::<VerboseError<Span>>(input).unwrap();
 
     let ts = TokenStream::new(&toks);
