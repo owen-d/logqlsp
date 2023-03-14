@@ -34,6 +34,23 @@ use nom::{
 };
 use nom_supreme::{context::ContextError, error::ErrorTree, tag::TagError};
 
+// shorthand for all the error dependencies when building parsers
+pub trait Errorable<I>:
+    ParseError<I>
+    + ContextError<I, &'static str>
+    + TagError<I, &'static str>
+    + nom::error::ContextError<I>
+{
+}
+
+impl<I, T> Errorable<I> for T where
+    T: ParseError<I>
+        + ContextError<I, &'static str>
+        + TagError<I, &'static str>
+        + nom::error::ContextError<I>
+{
+}
+
 #[derive(Debug)]
 pub struct SuggestiveError<I> {
     pub error: ErrorTree<I>,
@@ -82,6 +99,17 @@ where
     fn add_context(input: I, ctx: &'static str, other: Self) -> Self {
         SuggestiveError {
             error: ErrorTree::add_context(input, ctx, other.error),
+        }
+    }
+}
+
+impl<I> nom::error::ContextError<I> for SuggestiveError<I>
+where
+    ErrorTree<I>: nom::error::ContextError<I>,
+{
+    fn add_context(input: I, ctx: &'static str, other: Self) -> Self {
+        Self {
+            error: ContextError::add_context(input, ctx, other.error),
         }
     }
 }

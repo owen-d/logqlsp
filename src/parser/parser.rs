@@ -11,6 +11,7 @@ use nom_locate::position;
 use nom_supreme::tag::TagError;
 
 use super::{
+    errors::Errorable,
     lexer::{Delimited, Head, Token, TokenStream, Tokenable},
     pipeline::{parse_pipeline_expr, PipelineExpr},
     utils::{spanned, RefSpanned, Span, Spanned},
@@ -26,9 +27,7 @@ pub fn parse<'a, E>(
     input: TokenStream<'a>,
 ) -> IResult<TokenStream<'a>, RefSpanned<'a, LogExpr<Span<'a>>>, E>
 where
-    E: ParseError<TokenStream<'a>>
-        + ContextError<TokenStream<'a>>
-        + TagError<TokenStream<'a>, Token>,
+    E: Errorable<TokenStream<'a>>,
 {
     terminated(parse_log_expr, eof)(input)
 }
@@ -37,9 +36,7 @@ pub fn parse_log_expr<'a, E>(
     input: TokenStream<'a>,
 ) -> IResult<TokenStream<'a>, RefSpanned<'a, LogExpr<Span<'a>>>, E>
 where
-    E: ParseError<TokenStream<'a>>
-        + ContextError<TokenStream<'a>>
-        + TagError<TokenStream<'a>, Token>,
+    E: Errorable<TokenStream<'a>>,
 {
     context("log_expr", move |input| {
         let (input, selector) = parse_selector(input)?;
@@ -63,36 +60,33 @@ pub fn parse_filter<'a, E>(
     i: TokenStream<'a>,
 ) -> IResult<TokenStream<'a>, RefSpanned<'a, Filter>, E>
 where
-    E: ParseError<TokenStream<'a>>
-        + ContextError<TokenStream<'a>>
-        + TagError<TokenStream<'a>, Token>,
+    E: Errorable<TokenStream<'a>>,
 {
     let mappings = (
-        map(just("|=".delimiter()), |x| x.map_v(|_| Filter::Eq)),
-        map(just("!=".delimiter()), |x| x.map_v(|_| Filter::Neq)),
-        map(just("=~".delimiter()), |x| x.map_v(|_| Filter::Req)),
-        map(just("!~".delimiter()), |x| x.map_v(|_| Filter::NReq)),
+        map(just("|="), |x| x.map_v(|_| Filter::Eq)),
+        map(just("!="), |x| x.map_v(|_| Filter::Neq)),
+        map(just("=~"), |x| x.map_v(|_| Filter::Req)),
+        map(just("!~"), |x| x.map_v(|_| Filter::NReq)),
     );
 
     context("filter", alt(mappings))(i)
 }
 
-pub fn just<S, T, Input, Error>(tag: T) -> impl Fn(Input) -> IResult<Input, Spanned<S, T>, Error>
+pub fn just<'a, E>(
+    tag: &'static str,
+) -> impl Fn(TokenStream<'a>) -> IResult<TokenStream<'a>, RefSpanned<'a, Token>, E>
 where
-    Input: Head<Item = Spanned<S, T>> + InputTake,
-    T: PartialEq + InputLength,
-    Error: ParseError<Input> + TagError<Input, T>,
+    E: Errorable<TokenStream<'a>>,
 {
-    move |i: Input| {
+    move |i: TokenStream<'a>| {
         if let Some(found) = i.head() {
-            if found.value == tag {
-                let tag_len = tag.input_len();
+            if found.value.as_str() == tag {
+                let tag_len = tag.len();
                 let (rest, _) = i.take_split(tag_len);
                 return Ok((rest, found));
             }
         };
-        let e: ErrorKind = ErrorKind::Tag;
-        Err(nom::Err::Error(Error::from_error_kind(i, e)))
+        Err(nom::Err::Error(E::from_tag(i, tag)))
     }
 }
 
@@ -109,15 +103,13 @@ pub fn parse_matcher_type<'a, E>(
     input: TokenStream<'a>,
 ) -> IResult<TokenStream<'a>, RefSpanned<'a, MatcherType>, E>
 where
-    E: ParseError<TokenStream<'a>>
-        + ContextError<TokenStream<'a>>
-        + TagError<TokenStream<'a>, Token>,
+    E: Errorable<TokenStream<'a>>,
 {
     let mappings = (
-        map(just("=".delimiter()), |x| x.map_v(|_| MatcherType::Eq)),
-        map(just("!=".delimiter()), |x| x.map_v(|_| MatcherType::Neq)),
-        map(just("=~".delimiter()), |x| x.map_v(|_| MatcherType::Re)),
-        map(just("!~".delimiter()), |x| x.map_v(|_| MatcherType::Nre)),
+        map(just("="), |x| x.map_v(|_| MatcherType::Eq)),
+        map(just("!="), |x| x.map_v(|_| MatcherType::Neq)),
+        map(just("=~"), |x| x.map_v(|_| MatcherType::Re)),
+        map(just("!~"), |x| x.map_v(|_| MatcherType::Nre)),
     );
     context("matcher_type", alt(mappings))(input)
 }
@@ -134,9 +126,7 @@ pub fn parse_label_matcher<'a, E>(
     input: TokenStream<'a>,
 ) -> IResult<TokenStream<'a>, RefSpanned<'a, LabelMatcher<Span<'a>>>, E>
 where
-    E: ParseError<TokenStream<'a>>
-        + ContextError<TokenStream<'a>>
-        + TagError<TokenStream<'a>, Token>,
+    E: Errorable<TokenStream<'a>>,
 {
     let mut p = context("label_matcher", |i| {
         let label_name = context("label_name", parse_identifier);
@@ -166,18 +156,16 @@ pub fn parse_selector<'a, E>(
     input: TokenStream<'a>,
 ) -> IResult<TokenStream<'a>, RefSpanned<'a, Selector<Span<'a>>>, E>
 where
-    E: ParseError<TokenStream<'a>>
-        + ContextError<TokenStream<'a>>
-        + TagError<TokenStream<'a>, Token>,
+    E: Errorable<TokenStream<'a>>,
 {
     context("selector", |input| {
         // extract the span for the beginning of the selector
-        let (input, sp) = peek(just("{".delimiter())).parse(input)?;
+        let (input, sp) = peek(just("{")).parse(input)?;
 
         delimited(
-            just("{".delimiter()),
-            separated_list0(just(",".delimiter()), parse_label_matcher),
-            just("}".delimiter()),
+            just("{"),
+            separated_list0(just(","), parse_label_matcher),
+            just("}"),
         )
         .parse(input)
         .map(|(rest, labels)| (rest, sp.map_v(|_| Selector { labels })))

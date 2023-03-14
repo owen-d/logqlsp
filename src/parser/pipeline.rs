@@ -6,6 +6,7 @@ use nom::{
 use nom_supreme::tag::TagError;
 
 use super::{
+    errors::Errorable,
     lexer::{Token, TokenStream},
     parser::{parse_filter, parse_string, Filter},
     utils::{RefSpanned, Span, Spanned},
@@ -20,9 +21,7 @@ pub fn parse_pipeline_expr<'a, E>(
     input: TokenStream<'a>,
 ) -> IResult<TokenStream<'a>, RefSpanned<'a, PipelineExpr<Span<'a>>>, E>
 where
-    E: ParseError<TokenStream<'a>>
-        + ContextError<TokenStream<'a>>
-        + TagError<TokenStream<'a>, Token>,
+    E: Errorable<TokenStream<'a>>,
 {
     let (s, stages) = fold_many1(parse_pipeline_stage, Vec::new, |mut acc: Vec<_>, item| {
         acc.push(item);
@@ -45,9 +44,7 @@ pub fn parse_pipeline_stage<'a, E>(
     input: TokenStream<'a>,
 ) -> IResult<TokenStream<'a>, RefSpanned<'a, PipelineStage<Span<'a>>>, E>
 where
-    E: ParseError<TokenStream<'a>>
-        + ContextError<TokenStream<'a>>
-        + TagError<TokenStream<'a>, Token>,
+    E: Errorable<TokenStream<'a>>,
 {
     let (input, lf) = parse_line_filter(input)?;
     Ok((
@@ -66,9 +63,7 @@ pub fn parse_line_filter<'a, E>(
     input: TokenStream<'a>,
 ) -> IResult<TokenStream<'a>, RefSpanned<'a, LineFilter<Span<'a>>>, E>
 where
-    E: ParseError<TokenStream<'a>>
-        + ContextError<TokenStream<'a>>
-        + TagError<TokenStream<'a>, Token>,
+    E: Errorable<TokenStream<'a>>,
 {
     let (input, filter) = parse_filter(input)?;
     let (input, s) = parse_string(input)?;

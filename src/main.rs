@@ -2,12 +2,14 @@ use std::sync::Arc;
 
 use dashmap::DashMap;
 use log::warn;
+use logql_language_server::parser::errors::SuggestiveError;
 use logql_language_server::parser::lexer::{lex, Token, TokenStream};
 use logql_language_server::parser::parser::{parse, parse_log_expr, LogExpr};
 use logql_language_server::parser::utils::{Offset, Span, Spanned};
 use logql_language_server::semantic_tokens::{SemanticTokens, LEGEND_TYPE};
 use nom::error::{convert_error, VerboseError, VerboseErrorKind};
 use nom::Finish;
+use nom_supreme::error::ErrorTree;
 use ropey::Rope;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -233,7 +235,7 @@ impl Backend {
             .log_message(MessageType::INFO, "did change")
             .await;
         let input = Span::new(params.text.as_str());
-        let lexed = lex::<VerboseError<Span>>(input).finish();
+        let lexed = lex::<ErrorTree<Span>>(input).finish();
         let mut f = File {
             uri: params.uri.to_string(),
             tokens: None,
@@ -248,40 +250,41 @@ impl Backend {
                     .collect();
                 f.tokens = Some(mapped);
 
-                match parse::<VerboseError<_>>(TokenStream::new(&toks)).finish() {
+                match parse::<SuggestiveError<_>>(TokenStream::new(&toks)).finish() {
                     Ok((_, expr)) => {
                         self.client
                             .log_message(MessageType::INFO, format!("expr: {:#?}", expr))
                             .await
                     }
                     Err(e) => {
-                        let without_input = e
-                            .errors
-                            .iter()
-                            .map(|(_, e)| e.clone())
-                            .collect::<Vec<VerboseErrorKind>>();
                         self.client
-                            .log_message(
-                                MessageType::INFO,
-                                format!("parse error:\n{:#?}", without_input),
-                            )
+                            .log_message(MessageType::INFO, format!("parse error:\n{:#?}", e))
                             .await;
+                        // let without_input = e
+                        //     .errors
+                        //     .iter()
+                        //     .map(|(_, e)| e.clone())
+                        //     .collect::<Vec<VerboseErrorKind>>();
+                        // self.client
+                        //     .log_message(
+                        //         MessageType::INFO,
+                        //         format!("parse error:\n{:#?}", without_input),
+                        //     )
+                        //     .await;
                     }
                 }
-
-                None
             }
             Err(e) => {
                 // hack via https://github.com/fflorent/nom_locate/issues/36#issuecomment-1013469728
-                let errors = e
-                    .errors
-                    .iter()
-                    .map(|(input, error)| (*input.fragment(), error.clone()))
-                    .collect();
-                self.client
-                    .log_message(MessageType::INFO, format!("lex error:\n{:?}", e))
-                    .await;
-                Some(convert_error(*input.fragment(), VerboseError { errors }))
+                // let errors = e
+                //     .errors
+                //     .iter()
+                //     .map(|(input, error)| (*input.fragment(), error.clone()))
+                //     .collect();
+                // self.client
+                //     .log_message(MessageType::INFO, format!("lex error:\n{:?}", e))
+                //     .await;
+                // Some(convert_error(*input.fragment(), VerboseError { errors }))
             }
         };
 

@@ -1,3 +1,4 @@
+use std::fmt::Display;
 use std::iter::Enumerate;
 use std::marker::PhantomData;
 use std::ops::Deref;
@@ -47,6 +48,15 @@ impl Token {
             Token::String(_) => SemanticTokenType::STRING,
             Token::Identifier(_) => SemanticTokenType::VARIABLE,
             Token::Delimiter(_) => SemanticTokenType::OPERATOR,
+        }
+    }
+
+    pub fn as_str(&self) -> &str {
+        match self {
+            Token::Comment(s) => s,
+            Token::String(s) => s,
+            Token::Identifier(s) => s,
+            Token::Delimiter(s) => &s.s,
         }
     }
 }
