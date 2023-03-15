@@ -1,5 +1,6 @@
 use nom::{
-    error::{convert_error, ContextError, ParseError, VerboseError},
+    combinator::cut,
+    error::{context, convert_error, ContextError, ParseError, VerboseError},
     multi::fold_many1,
     Finish, IResult,
 };
@@ -66,7 +67,7 @@ where
     E: Errorable<TokenStream<'a>>,
 {
     let (input, filter) = parse_filter(input)?;
-    let (input, s) = parse_string(input)?;
+    let (input, s) = context("line_filter", cut(parse_string))(input)?;
     let lf = Spanned::from((filter.span.clone(), LineFilter { filter, s }));
     Ok((input, lf))
 }

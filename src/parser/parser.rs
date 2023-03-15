@@ -194,7 +194,7 @@ macro_rules! impl_token_type_parser {
                 let e: ErrorKind = ErrorKind::Tag;
                 Err(nom::Err::Error(E::from_error_kind(input, e)))
             };
-            context("$i", f)(input)
+            context(stringify!($i), f)(input)
         }
     };
 }

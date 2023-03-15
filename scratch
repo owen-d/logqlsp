@@ -1,8 +1,5 @@
-convert_error(input, e)
-context()
-ParseError trait
-finish
-nom-supreme gives ErrorTree<T>, which is `alt`-aware VerboseError<T>
+better handling for nested many's so we see i.e. `alt(eof, pipeline)`
+
 Can impl ParseError trait if need more control: https://github.com/rust-bakery/nom/blob/main/doc/error_management.md
 
 # Expected errors

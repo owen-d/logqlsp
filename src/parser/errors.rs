@@ -109,7 +109,8 @@ impl SuggestiveError<&str> {
                 }
                 GenericErrorTree::Stack { base, contexts } => {
                     let mut h = HashMap::<HashableRange, _, _>::new();
-                    for (s, ctx) in contexts.iter() {
+                    // unwind the trace, preferring the lower level context that errored for each range
+                    for (s, ctx) in contexts.iter().rev() {
                         // decrement contexts so they don't overlap with the base
                         let range = HashableRange::from(range_from_span(input, s)).decrement();
                         let message = format!("{}", ctx);
