@@ -256,9 +256,9 @@ impl Backend {
                     final_parser(parse::<SuggestiveError<_>>)(TokenStream::new(input, &toks));
                 match x {
                     Ok(expr) => {
-                        self.client
-                            .log_message(MessageType::INFO, format!("expr: {:#?}", expr))
-                            .await
+                        // self.client
+                        //     .log_message(MessageType::INFO, format!("expr: {:#?}", expr))
+                        //     .await
                     }
                     Err(e) => {
                         if let Some(diagnostics) = e.diagnostics(input) {

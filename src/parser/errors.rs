@@ -71,72 +71,81 @@ fn loc_from_span(input: &str, sp: &str) -> Location {
 fn range_from_span(input: &str, sp: &str) -> Range {
     let start = loc_from_span(input, sp);
     let end = loc_from_span(input, &sp[sp.len()..]);
+    // positions are 0-indexed whereas the locations are
+    // 1-indexed
     Range {
         start: Position {
-            line: start.line as u32,
-            character: start.column as u32,
+            line: start.line as u32 - 1,
+            character: start.column as u32 - 1,
         },
         end: Position {
-            line: end.line as u32,
-            character: end.column as u32,
+            line: end.line as u32 - 1,
+            character: end.column as u32 - 1,
         },
     }
 }
 
 impl SuggestiveError<&str> {
     pub fn diagnostics(&self, input: &str) -> Option<Vec<Diagnostic>> {
-        fn add_diagnostic(e: &ErrorTree<&str>, input: &str, diagnostics: &mut Vec<Diagnostic>) {
-            match e {
-                GenericErrorTree::Base { location, kind } => {
-                    let range = range_from_span(input, location);
-                    let message = format!("{}", kind);
-                    log::warn!(
-                        "kind {}, s {:#}, loc {:#?}",
-                        kind,
-                        location,
-                        range_from_span(input, location)
-                    );
-                    diagnostics.push(Diagnostic {
-                        severity: Some(DiagnosticSeverity::ERROR),
-                        range,
-                        message,
-                        ..Default::default()
-                    });
-                }
-                GenericErrorTree::Stack { base, contexts } => {
-                    for (s, ctx) in contexts.iter() {
-                        log::warn!(
-                            "ctx {}, s {:#}, range {:#?}",
-                            ctx,
-                            s,
-                            range_from_span(input, s)
-                        );
-                        let range = range_from_span(input, s);
-                        let message = format!("{}", ctx);
-                        diagnostics.push(Diagnostic {
-                            severity: Some(DiagnosticSeverity::WARNING),
-                            range,
-                            message,
-                            ..Default::default()
-                        });
-                        add_diagnostic(base, input, diagnostics)
-                    }
-                }
-                GenericErrorTree::Alt(siblings) => {
-                    for sibling in siblings {
-                        add_diagnostic(sibling, input, diagnostics)
-                    }
-                }
-            };
-        }
+        Some(vec![Diagnostic {
+            severity: Some(DiagnosticSeverity::ERROR),
+            range: range_from_span(input, input),
+            message: format!("{}", self),
+            ..Default::default()
+        }])
+        // fn add_diagnostic(e: &ErrorTree<&str>, input: &str, diagnostics: &mut Vec<Diagnostic>) {
+        //     match e {
+        //         GenericErrorTree::Base { location, kind } => {
+        //             let range = range_from_span(input, location);
+        //             let message = format!("{}", kind);
+        //             log::warn!(
+        //                 "kind {}, s {:#}, loc {:#?}",
+        //                 kind,
+        //                 location,
+        //                 range_from_span(input, location)
+        //             );
+        //             diagnostics.push(Diagnostic {
+        //                 severity: Some(DiagnosticSeverity::ERROR),
+        //                 range,
+        //                 message,
+        //                 ..Default::default()
+        //             });
+        //         }
+        //         GenericErrorTree::Stack { base, contexts } => {
+        //             for (s, ctx) in contexts.iter() {
+        //                 log::warn!(
+        //                     "ctx {}, s {:#}, range {:#?}",
+        //                     ctx,
+        //                     s,
+        //                     range_from_span(input, s)
+        //                 );
+        //                 let range = range_from_span(input, s);
+        //                 let message = format!("{}", ctx);
+        //                 diagnostics.push(Diagnostic {
+        //                     severity: Some(DiagnosticSeverity::WARNING),
+        //                     range,
+        //                     message,
+        //                     ..Default::default()
+        //                 });
+        //                 add_diagnostic(base, input, diagnostics)
+        //             }
+        //         }
+        //         GenericErrorTree::Alt(siblings) => {
+        //             for sibling in siblings {
+        //                 log::warn!("sibling {:#?}", sibling);
+        //                 add_diagnostic(sibling, input, diagnostics)
+        //             }
+        //         }
+        //     };
+        // }
 
-        let mut diagnostics = Vec::new();
-        add_diagnostic(&self.error, input, &mut diagnostics);
-        if diagnostics.len() > 0 {
-            Some(diagnostics)
-        } else {
-            None
-        }
+        // let mut diagnostics = Vec::new();
+        // add_diagnostic(&self.error, input, &mut diagnostics);
+        // if diagnostics.len() > 0 {
+        //     Some(diagnostics)
+        // } else {
+        //     None
+        // }
     }
 }
 
