@@ -261,6 +261,15 @@ impl Backend {
                             .await
                     }
                     Err(e) => {
+                        if let Some(diagnostics) = e.diagnostics(input) {
+                            self.client
+                                .publish_diagnostics(
+                                    params.uri.clone(),
+                                    diagnostics,
+                                    Some(params.version),
+                                )
+                                .await;
+                        }
                         self.client
                             .log_message(MessageType::INFO, format!("parse error:\n{}", e))
                             .await;
