@@ -176,12 +176,12 @@ where
 // macro to generate parsers that match a specific token variant
 #[macro_export]
 macro_rules! impl_token_type_parser {
-    ($name: ident, $i:ident, $return_ty:ty, $extractor:expr) => {
+    ($name: ident, $msg: expr, $i:ident, $return_ty:ty, $extractor:expr) => {
         pub(crate) fn $name<'a, E>(
             input: TokenStream<'a>,
         ) -> IResult<TokenStream<'a>, RefSpanned<'a, $return_ty>, E>
         where
-            E: ParseError<TokenStream<'a>> + ContextError<TokenStream<'a>>,
+            E: Errorable<TokenStream<'a>>,
         {
             let f = move |input: TokenStream<'a>| {
                 if let Some(head) = input.head() {
@@ -191,18 +191,23 @@ macro_rules! impl_token_type_parser {
                         return Ok((rest, head.map_v(|_| $extractor(x))));
                     }
                 }
-                let e: ErrorKind = ErrorKind::Tag;
-                Err(nom::Err::Error(E::from_error_kind(input, e)))
+                Err(nom::Err::Error(E::from_tag(input, $msg)))
             };
-            context(stringify!($i), f)(input)
+            f(input)
         }
     };
 }
 
-impl_token_type_parser!(parse_comment, Comment, String, |x| x);
-impl_token_type_parser!(parse_string, String, String, |x| x);
-impl_token_type_parser!(parse_identifier, Identifier, String, |x| x);
-impl_token_type_parser!(parse_delimiter, Delimiter, Delimited<String>, |x| x);
+impl_token_type_parser!(parse_comment, "comment", Comment, String, |x| x);
+impl_token_type_parser!(parse_string, "string", String, String, |x| x);
+impl_token_type_parser!(parse_identifier, "identifier", Identifier, String, |x| x);
+impl_token_type_parser!(
+    parse_delimiter,
+    "delimiter",
+    Delimiter,
+    Delimited<String>,
+    |x| x
+);
 
 #[cfg(test)]
 #[test]
