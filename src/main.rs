@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use dashmap::DashMap;
 use log::warn;
-use logql_language_server::parser::errors::SuggestiveError;
+use logql_language_server::parser::errors::{entire_range, SuggestiveError};
 use logql_language_server::parser::lexer::{lex, Token, TokenStream};
 use logql_language_server::parser::parser::{parse, parse_log_expr, LogExpr};
 use logql_language_server::parser::utils::{Offset, Span, Spanned};
@@ -242,7 +242,8 @@ impl Backend {
             uri: params.uri.to_string(),
             tokens: None,
         };
-        match lexed {
+
+        let diagnostics = match lexed {
             Ok((_, toks)) => {
                 // map spans into a non-referenced variant
                 let mapped = toks
@@ -255,42 +256,34 @@ impl Backend {
                 let x: core::result::Result<_, SuggestiveError<&str>> =
                     final_parser(parse::<SuggestiveError<_>>)(TokenStream::new(input, &toks));
                 match x {
-                    Ok(expr) => {
+                    Ok(_expr) => {
                         // self.client
                         //     .log_message(MessageType::INFO, format!("expr: {:#?}", expr))
                         //     .await
+                        vec![]
                     }
                     Err(e) => {
-                        if let Some(diagnostics) = e.diagnostics(input) {
-                            self.client
-                                .publish_diagnostics(
-                                    params.uri.clone(),
-                                    diagnostics,
-                                    Some(params.version),
-                                )
-                                .await;
-                        }
                         self.client
                             .log_message(MessageType::INFO, format!("parse error:\n{}", e))
                             .await;
+                        e.diagnostics(input)
                     }
-                };
+                }
             }
             Err(e) => {
-                // hack via https://github.com/fflorent/nom_locate/issues/36#issuecomment-1013469728
-                // let errors = e
-                //     .errors
-                //     .iter()
-                //     .map(|(input, error)| (*input.fragment(), error.clone()))
-                //     .collect();
-                // self.client
-                //     .log_message(MessageType::INFO, format!("lex error:\n{:?}", e))
-                //     .await;
-                // Some(convert_error(*input.fragment(), VerboseError { errors }))
+                vec![Diagnostic {
+                    severity: Some(DiagnosticSeverity::WARNING),
+                    range: entire_range(input),
+                    message: format!("lexing error:\n{}", e),
+                    ..Default::default()
+                }]
             }
         };
 
         self.document_map.insert(f.uri.clone(), f);
+        self.client
+            .publish_diagnostics(params.uri.clone(), diagnostics, Some(params.version))
+            .await;
 
         // TODO: add diagnostics
     }

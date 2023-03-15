@@ -26,7 +26,10 @@
 // 2 * 3 => int
 // 6 / 4 => float
 
-use std::fmt::{Debug, Display, Error, Formatter};
+use std::{
+    collections::HashMap,
+    fmt::{Debug, Display, Error, Formatter},
+};
 
 use nom::{
     error::{ErrorKind, FromExternalError, ParseError},
@@ -38,6 +41,7 @@ use nom_supreme::{
     final_parser::{ExtractContext, Location, RecreateContext},
     tag::TagError,
 };
+use serde_json::to_string;
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, Position, Range};
 
 use super::lexer::{Head, TokenStream};
@@ -68,17 +72,21 @@ fn loc_from_span(input: &str, sp: &str) -> Location {
     Location::locate_tail(input, sp)
 }
 
-fn range_from_span(input: &str, sp: &str) -> Range {
+pub fn entire_range(input: &str) -> Range {
+    range_from_span(input, input).into()
+}
+
+fn range_from_span(input: &str, sp: &str) -> HashableRange {
     let start = loc_from_span(input, sp);
     let end = loc_from_span(input, &sp[sp.len()..]);
     // positions are 0-indexed whereas the locations are
     // 1-indexed
-    Range {
-        start: Position {
+    HashableRange {
+        from: HashablePosition {
             line: start.line as u32 - 1,
             character: start.column as u32 - 1,
         },
-        end: Position {
+        to: HashablePosition {
             line: end.line as u32 - 1,
             character: end.column as u32 - 1,
         },
@@ -86,66 +94,52 @@ fn range_from_span(input: &str, sp: &str) -> Range {
 }
 
 impl SuggestiveError<&str> {
-    pub fn diagnostics(&self, input: &str) -> Option<Vec<Diagnostic>> {
-        Some(vec![Diagnostic {
-            severity: Some(DiagnosticSeverity::ERROR),
-            range: range_from_span(input, input),
-            message: format!("{}", self),
-            ..Default::default()
-        }])
-        // fn add_diagnostic(e: &ErrorTree<&str>, input: &str, diagnostics: &mut Vec<Diagnostic>) {
-        //     match e {
-        //         GenericErrorTree::Base { location, kind } => {
-        //             let range = range_from_span(input, location);
-        //             let message = format!("{}", kind);
-        //             log::warn!(
-        //                 "kind {}, s {:#}, loc {:#?}",
-        //                 kind,
-        //                 location,
-        //                 range_from_span(input, location)
-        //             );
-        //             diagnostics.push(Diagnostic {
-        //                 severity: Some(DiagnosticSeverity::ERROR),
-        //                 range,
-        //                 message,
-        //                 ..Default::default()
-        //             });
-        //         }
-        //         GenericErrorTree::Stack { base, contexts } => {
-        //             for (s, ctx) in contexts.iter() {
-        //                 log::warn!(
-        //                     "ctx {}, s {:#}, range {:#?}",
-        //                     ctx,
-        //                     s,
-        //                     range_from_span(input, s)
-        //                 );
-        //                 let range = range_from_span(input, s);
-        //                 let message = format!("{}", ctx);
-        //                 diagnostics.push(Diagnostic {
-        //                     severity: Some(DiagnosticSeverity::WARNING),
-        //                     range,
-        //                     message,
-        //                     ..Default::default()
-        //                 });
-        //                 add_diagnostic(base, input, diagnostics)
-        //             }
-        //         }
-        //         GenericErrorTree::Alt(siblings) => {
-        //             for sibling in siblings {
-        //                 log::warn!("sibling {:#?}", sibling);
-        //                 add_diagnostic(sibling, input, diagnostics)
-        //             }
-        //         }
-        //     };
-        // }
+    pub fn diagnostics(&self, input: &str) -> Vec<Diagnostic> {
+        fn add_diagnostic(e: &ErrorTree<&str>, input: &str, diagnostics: &mut Vec<Diagnostic>) {
+            match e {
+                GenericErrorTree::Base { location, kind } => {
+                    let range = range_from_span(input, location).into();
+                    let message = format!("{}", kind);
+                    diagnostics.push(Diagnostic {
+                        severity: Some(DiagnosticSeverity::ERROR),
+                        range,
+                        message,
+                        ..Default::default()
+                    });
+                }
+                GenericErrorTree::Stack { base, contexts } => {
+                    let mut h = HashMap::<HashableRange, _, _>::new();
+                    for (s, ctx) in contexts.iter() {
+                        // decrement contexts so they don't overlap with the base
+                        let range = HashableRange::from(range_from_span(input, s)).decrement();
+                        let message = format!("{}", ctx);
+                        // prefer the highest level context for each range
+                        h.entry(range).or_insert(message);
+                    }
 
-        // let mut diagnostics = Vec::new();
-        // add_diagnostic(&self.error, input, &mut diagnostics);
-        // if diagnostics.len() > 0 {
-        //     Some(diagnostics)
-        // } else {
-        //     None
-        // }
+                    // add diagnostics for each context, deduped by range & preferring the highest level context
+                    for (range, v) in h.into_iter() {
+                        diagnostics.push(Diagnostic {
+                            severity: Some(DiagnosticSeverity::WARNING),
+                            range: range.into(),
+                            message: v,
+                            ..Default::default()
+                        });
+                    }
+
+                    add_diagnostic(base, input, diagnostics)
+                }
+                GenericErrorTree::Alt(siblings) => {
+                    for sibling in siblings {
+                        add_diagnostic(sibling, input, diagnostics)
+                    }
+                }
+            };
+        }
+
+        let mut diagnostics = Vec::new();
+        add_diagnostic(&self.error, input, &mut diagnostics);
+        diagnostics
     }
 }
 
@@ -241,6 +235,61 @@ where
     fn extract_context(self, original_input: I) -> SuggestiveError<I2> {
         SuggestiveError {
             error: self.error.extract_context(original_input),
+        }
+    }
+}
+
+// helpers for hashing the lsp-types
+#[derive(Debug, Hash, PartialEq, Eq)]
+struct HashableRange {
+    from: HashablePosition,
+    to: HashablePosition,
+}
+impl HashableRange {
+    // helper for decrementing range by 1 character
+    fn decrement(self) -> Self {
+        HashableRange {
+            to: HashablePosition {
+                line: self.to.line,
+                character: self.to.character - 1,
+            },
+            ..self
+        }
+    }
+}
+
+#[derive(Debug, Hash, PartialEq, Eq)]
+struct HashablePosition {
+    line: u32,
+    character: u32,
+}
+
+impl From<Range> for HashableRange {
+    fn from(r: Range) -> Self {
+        HashableRange {
+            from: HashablePosition {
+                line: r.start.line,
+                character: r.start.character,
+            },
+            to: HashablePosition {
+                line: r.end.line,
+                character: r.end.character,
+            },
+        }
+    }
+}
+
+impl From<HashableRange> for Range {
+    fn from(r: HashableRange) -> Self {
+        Range {
+            start: Position {
+                line: r.from.line,
+                character: r.from.character,
+            },
+            end: Position {
+                line: r.to.line,
+                character: r.to.character,
+            },
         }
     }
 }
