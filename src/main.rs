@@ -252,8 +252,8 @@ impl Backend {
                     .collect();
                 f.tokens = Some(mapped);
 
-                let x: core::result::Result<_, ErrorTree<&str>> =
-                    final_parser(parse::<ErrorTree<_>>)(TokenStream::new(input, &toks));
+                let x: core::result::Result<_, SuggestiveError<&str>> =
+                    final_parser(parse::<SuggestiveError<_>>)(TokenStream::new(input, &toks));
                 match x {
                     Ok(expr) => {
                         self.client
@@ -266,30 +266,6 @@ impl Backend {
                             .await;
                     }
                 };
-
-                // match parse::<SuggestiveError<_>>(TokenStream::new(&toks)).finish() {
-                //     Ok((_, expr)) => {
-                //         self.client
-                //             .log_message(MessageType::INFO, format!("expr: {:#?}", expr))
-                //             .await
-                //     }
-                //     Err(e) => {
-                //         self.client
-                //             .log_message(MessageType::INFO, format!("parse error:\n{:#?}", e))
-                //             .await;
-                //         // let without_input = e
-                //         //     .errors
-                //         //     .iter()
-                //         //     .map(|(_, e)| e.clone())
-                //         //     .collect::<Vec<VerboseErrorKind>>();
-                //         // self.client
-                //         //     .log_message(
-                //         //         MessageType::INFO,
-                //         //         format!("parse error:\n{:#?}", without_input),
-                //         //     )
-                //         //     .await;
-                //     }
-                // }
             }
             Err(e) => {
                 // hack via https://github.com/fflorent/nom_locate/issues/36#issuecomment-1013469728

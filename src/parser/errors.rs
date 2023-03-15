@@ -33,7 +33,10 @@ use nom::{
     InputIter, InputLength, Offset,
 };
 use nom_supreme::{
-    context::ContextError, error::ErrorTree, final_parser::RecreateContext, tag::TagError,
+    context::ContextError,
+    error::ErrorTree,
+    final_parser::{ExtractContext, RecreateContext},
+    tag::TagError,
 };
 
 use super::lexer::{Head, TokenStream};
@@ -141,6 +144,17 @@ impl<'a> RecreateContext<TokenStream<'a>> for &'a str {
                 // we're at end of input, return the empty tail
                 &tail.src[tail.src.len()..]
             }
+        }
+    }
+}
+
+impl<I, I2> ExtractContext<I, SuggestiveError<I2>> for SuggestiveError<I>
+where
+    ErrorTree<I>: ExtractContext<I, ErrorTree<I2>>,
+{
+    fn extract_context(self, original_input: I) -> SuggestiveError<I2> {
+        SuggestiveError {
+            error: self.error.extract_context(original_input),
         }
     }
 }
