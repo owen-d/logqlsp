@@ -81,8 +81,8 @@ where
     move |i: TokenStream<'a>| {
         if let Some(found) = i.head() {
             if found.value.as_str() == tag {
-                let tag_len = tag.len();
-                let (rest, _) = i.take_split(tag_len);
+                let len = found.value.input_len();
+                let (rest, _) = i.take_split(len);
                 return Ok((rest, found));
             }
         };

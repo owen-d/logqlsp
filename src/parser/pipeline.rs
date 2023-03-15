@@ -80,12 +80,25 @@ fn test_parse_pipeline_expr() {
 
     let got = parse_pipeline_expr::<VerboseError<_>>(ts.clone()).finish();
     match got {
-        Ok((_, xs)) => {
-            assert_eq!(2, xs.value.stages.len());
-        }
+        Ok((_, x)) => assert_eq!(2, x.value.stages.len()),
         Err(e) => {
-            let s = convert_error(ts, e);
-            assert_eq!("", s)
+            assert_eq!(false, true, "{:#?}", e);
         }
-    }
+    };
+}
+
+#[test]
+fn test_parse_line_filter() {
+    let input = r#"|= "foo" != "bar""#;
+    let (_, toks) = super::lexer::lex::<VerboseError<Span>>(input).unwrap();
+
+    let ts = TokenStream::new(input, &toks);
+
+    let got = parse_line_filter::<VerboseError<_>>(ts.clone()).finish();
+    match got {
+        Ok((_, x)) => assert_eq!(r#""foo""#.to_string(), x.value.s.value),
+        Err(e) => {
+            assert_eq!(false, true, "{:#?}", e);
+        }
+    };
 }
